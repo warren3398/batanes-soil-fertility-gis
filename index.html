@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Soil Fertility Map Generator</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/workspace.css?v=3">
+  <link rel="stylesheet" href="assets/workspace.css?v=4">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
-  <script defer src="assets/workspace.js?v=3"></script>
+  <script defer src="assets/workspace.js?v=4"></script>
 </head>
 <body>
 <header class="app-header">
@@ -98,10 +98,15 @@
           <div class="table-wrap"><table><thead><tr><th>Fertility class</th><th>Range</th><th>Area (ha)</th><th>Share (%)</th></tr></thead>
             <tbody id="classes"><tr><td colspan="4" class="empty">Area statistics appear after processing.</td></tr></tbody></table></div>
           <p id="class-note" class="muted"></p>
+          <article class="map-conclusion" id="map-conclusion" hidden>
+            <h3>Map findings and conclusion</h3>
+            <p id="map-summary"></p>
+            <p><strong>Conclusion.</strong> <span id="map-interpretation"></span></p>
+          </article>
         </div>
       </section>
       <section class="panel" id="diagnostic-report" hidden>
-        <h2>Summary and conclusions</h2>
+        <h2>Model diagnostics</h2>
         <div class="panel-body conclusion-grid" id="diagnostic-findings"></div>
       </section>
     </div>

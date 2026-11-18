@@ -17,6 +17,33 @@ GRAY = colors.HexColor("#526778")
 RULE = colors.HexColor("#dce5eb")
 
 
+def map_finding(summary, values):
+    classes = summary["classes"]
+    total = sum(row["area_ha"] for row in classes)
+    largest = max(row["area_ha"] for row in classes)
+    leaders = [row for row in classes if row["area_ha"] == largest]
+    lower = sum(row["percent"] for row in classes[:2])
+    higher = sum(row["percent"] for row in classes[-2:])
+    if values.min() == values.max():
+        pattern = "The prediction was uniform across the mapped area."
+    elif len(leaders) == 1:
+        leader = leaders[0]
+        pattern = f"The {leader['label'].lower()} class covered the most area ({largest:,.2f} ha, {leader['percent']:.1f}%)."
+    else:
+        labels = ", ".join(row["label"].lower() for row in leaders)
+        pattern = f"The leading classes ({labels}) tied at {largest:,.2f} ha each ({leaders[0]['percent']:.1f}% each)."
+    basis = ("The class labels describe relative levels within this prediction map."
+             if summary["classification"].startswith("Equal intervals") else
+             "Class shares reflect the thresholds supplied for this run.")
+    return dict(
+        summary=f"For {summary['parameter']} in {summary['study_area']}, the mapped area was {total:,.2f} ha. "
+                f"Predicted values ranged from {values.min():.5g} to {values.max():.5g}, "
+                f"with a mean of {values.mean(dtype=np.float64):.5g} ({summary['units'] or 'source units'}).",
+        conclusion=pattern + f" The two lower classes accounted for {lower:.1f}% of the mapped area, "
+                  f"and the two higher classes accounted for {higher:.1f}%. " + basis,
+    )
+
+
 def findings(summary):
     variogram = summary["variogram"]
     validation = summary["validation"]
@@ -149,15 +176,16 @@ def technical_pdf(summary, info, columns, rows, metrics):
         table(["Item", "Run details"], info, [146, 321]),
         Paragraph("2. Classification and mapped area", heading),
         table(columns, rows, [112, 157, 98, 100]),
-        Paragraph("3. Model validation", heading),
+        Paragraph("3. Map findings and conclusion", heading), *finding(summary["map_finding"]),
+        Paragraph("4. Model validation", heading),
         table(["Metric", "Value"], metrics, [285, 182]), Spacer(1, 5),
         *finding(model),
-        Paragraph("4. Five-fold cross-validation", heading), *finding(cv),
         PageBreak(),
-        Paragraph("5. Experimental variogram", heading),
+        Paragraph("5. Five-fold cross-validation", heading), *finding(cv),
+        Paragraph("6. Experimental variogram", heading),
         plot(list(zip(data["lag"], data["gamma"])), list(zip(data["distance"], data["fitted"])), ("Distance (m)", "Semivariance")),
         Paragraph("Figure 1. Experimental lag bins (dots) and model fit (line).", caption), Spacer(1, 5), *finding(variogram),
-        Paragraph("6. Observed vs. predicted", heading),
+        Paragraph("7. Observed vs. predicted", heading),
         plot(list(zip(val["observed"], val["predicted"])), [(low, low), (high, high)], ("Observed", "Predicted"), equal_axes=True),
         Paragraph("Figure 2. Out-of-fold predictions (dots) against the 1:1 reference line.", caption), Spacer(1, 5), *finding(observed),
     ]

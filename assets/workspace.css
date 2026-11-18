@@ -108,3 +108,6 @@ footer { display: flex; gap: 16px; justify-content: space-between; padding: 10px
 .advanced h3:not(:first-child) { margin-top: 5px; }
 .conclusion-grid { display: grid; gap: 13px; }
 .conclusion-grid p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.map-conclusion { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+.map-conclusion h3 { font-size: 13px; margin: 0 0 4px; }
+.map-conclusion p { font-size: 12px; line-height: 1.5; margin: 6px 0; }

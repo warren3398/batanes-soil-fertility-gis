@@ -311,6 +311,9 @@ function renderResults(area, points) {
     return item;
   }));
   $('diagnostic-report').hidden = false;
+  $('map-summary').textContent = info.map_finding.summary;
+  $('map-interpretation').textContent = info.map_finding.conclusion;
+  $('map-conclusion').hidden = false;
   $('class-note').textContent = info.classification + ' · ' + (info.units || 'Source units');
   for (const metric of ['r2', 'rmse', 'mae', 'mbe']) $(metric).textContent = number(info.validation[metric]);
   swapChart($('scatter'), 'validation');

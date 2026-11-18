@@ -12,7 +12,7 @@ from pykrige.ok import OrdinaryKriging
 from rasterio.io import MemoryFile
 from rasterio.transform import array_bounds, from_bounds
 from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
-from diagnostic_report import findings, technical_pdf
+from diagnostic_report import findings, map_finding, technical_pdf
 from scipy.linalg import pinv
 from scipy.ndimage import distance_transform_edt
 from scipy.optimize import least_squares
@@ -283,6 +283,7 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
                     archive.write(file, file.name)
             out.writestr("soil_layers_shp.zip", shape_zip.getvalue())
             out.writestr("soil_fertility.qgz", qgis_project(transform, z.shape, crs.to_string()))
+            summary["map_finding"] = map_finding(summary, vals)
             summary["findings"] = findings(summary)
             reports(out, summary)
         else:
