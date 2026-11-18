@@ -15,6 +15,7 @@ app.add_middleware(CORSMiddleware,allow_origins=["https://warren3398.github.io",
 @app.get("/health")
 def health(): return {"status":"ok","method":"ordinary_kriging","boundaries":"upload_required"}
 def loadshape(b,folder):
+    Path(folder).mkdir(parents=True,exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(b)) as z:
         for n in z.namelist():
             p=Path(n)
