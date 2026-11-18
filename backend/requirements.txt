@@ -6,3 +6,4 @@ pandas==2.2.3
 geopandas==1.0.1
 pykrige==1.7.2
 rasterio==1.4.3
+boto3==1.38.13
