@@ -6,10 +6,11 @@ import geopandas as gpd
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pykrige.ok import OrdinaryKriging
 from rasterio.transform import from_origin
 from shapely.geometry import mapping
+from map_layout import LAYOUT_MAX_BYTES, map_layout
 from mapping_outputs import diagnostics, predict_grid, write_outputs
 import boto3
 from botocore.config import Config
@@ -122,6 +123,21 @@ def municipalities(province:str):
     a=g[g.province.astype(str).str.casefold()==province.casefold()]
     if a.empty: raise HTTPException(404,"Province not found")
     return json.loads(a.to_crs(4326).to_json())
+
+@app.post("/map-layout", response_class=Response)
+def export_map_layout(result: UploadFile = File(...)):
+    from rasterio.errors import RasterioError
+    from shapely.errors import GEOSException
+
+    content = result.file.read(LAYOUT_MAX_BYTES + 1)
+    if len(content) > LAYOUT_MAX_BYTES:
+        raise HTTPException(413, "Map layout input exceeds 12 MB")
+    try:
+        image = map_layout(content)
+    except (ValueError, KeyError, TypeError, IndexError, OSError, zipfile.BadZipFile, RasterioError, GEOSException) as exc:
+        raise HTTPException(400, "Could not create the map layout from this mapping result") from exc
+    return Response(image, media_type="image/jpeg")
+
 
 @app.post("/interpolate")
 def interpolate(

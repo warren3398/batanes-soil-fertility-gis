@@ -319,7 +319,7 @@ function renderResults(area, points) {
   swapChart($('scatter'), 'validation');
   swapChart($('variogram'), 'variogram');
   views.find((button) => button.dataset.view === 'elevation').hidden = !info.elevation;
-  for (const button of exports) button.disabled = false;
+  for (const button of exports) button.disabled = button.getAttribute('aria-busy') === 'true';
   const selected = views.find((button) => button.getAttribute('aria-pressed') === 'true');
   displayView(selected && !selected.hidden ? selected.dataset.view : 'prediction');
   fitBoundary();
@@ -440,6 +440,25 @@ for (const button of exports) {
           const archive = new JSZip();
           for (const [parameter, result] of results) archive.file(parameter + '.zip', result.blob);
           download(await archive.generateAsync({ type: 'blob' }), 'soil_fertility_all_parameters.zip');
+        }
+      } else if (name === 'layout') {
+        const selected = run;
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Generating map layout…';
+        button.setAttribute('aria-busy', 'true');
+        try {
+          const archive = new JSZip();
+          const files = ['summary.json', 'map_boundary.geojson', 'samples.geojson', 'map_prediction.tif'];
+          await Promise.all(files.map(async (file) => archive.file(file, await selected.zip.file(file).async('uint8array'))));
+          const data = new FormData();
+          data.set('result', await archive.generateAsync({ type: 'blob' }), 'map-result.zip');
+          const response = await request('/map-layout', { method: 'POST', body: data });
+          download(await response.blob(), 'soil_fertility_' + selected.summary.parameter + '_layout.jpg');
+        } finally {
+          button.textContent = originalLabel;
+          button.removeAttribute('aria-busy');
+          button.disabled = false;
         }
       } else if (name === 'rasters' || name === 'qgis') {
         const source = run.zip;
