@@ -146,7 +146,7 @@ def interpolate(
     province: str = Form(""), municipality: str = Form(""), parameter: str = Form("N"), resolution: int = Form(100),
     model: str = Form("spherical"), lags: int = Form(12), lag_distance: float = Form(0),
     dashboard: bool = Form(False), thresholds: str = Form(""), units: str = Form(""),
-    manual_variogram: str = Form(""),
+    manual_variogram: str = Form(""), p_method: str = Form("Bray 1"), k_method: str = Form("Cold H2SO4"),
 ):
     from rasterio.errors import RasterioIOError
     from rasterio.features import geometry_mask
@@ -157,6 +157,8 @@ def interpolate(
         raise HTTPException(400, "Invalid variogram settings")
     if parameter not in {"N", "P", "K", "pH", "OM"}:
         raise HTTPException(400, "Choose N, P, K, pH, or OM")
+    if p_method not in {"Bray 1", "Olsen"} or k_method not in {"Cold H2SO4", "Hot H2SO4"}:
+        raise HTTPException(400, "Choose a supported laboratory method for P and K")
     value_fields = ("om", "organic matter", "organic_matter", "organic_ma") if parameter == "OM" else (parameter.casefold(),)
     try:
         with tempfile.TemporaryDirectory() as d:
@@ -273,7 +275,7 @@ def interpolate(
                            resolution_m=resolution, method="ordinary_kriging", model=model, crs=utm.to_string(),
                            units=units.strip()[:32], validation=validation, variogram_fit="manual" if manual_variogram else "automatic")
             output = write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard,
-                                   thresholds, ok, dem, lag_distance, lags)
+                                   thresholds, ok, dem, lag_distance, lags, p_method, k_method)
             return StreamingResponse(output, media_type="application/zip", headers={
                 "Content-Disposition": "attachment; filename=soil_fertility_outputs.zip"
             })

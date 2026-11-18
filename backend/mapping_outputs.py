@@ -12,14 +12,13 @@ from pykrige.ok import OrdinaryKriging
 from rasterio.io import MemoryFile
 from rasterio.transform import array_bounds, from_bounds
 from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
+from classification import classification, classify_values
 from diagnostic_report import findings, map_finding, technical_pdf
 from scipy.linalg import pinv
 from scipy.ndimage import distance_transform_edt
 from scipy.optimize import least_squares
 from scipy.spatial.distance import cdist, pdist
 
-COLORS = ["#e74c43", "#f29435", "#f4d64f", "#91ce53", "#22864b"]
-LABELS = ["Very low", "Low", "Moderate", "High", "Very high"]
 NODATA = -9999
 
 
@@ -182,7 +181,7 @@ def reports(out, summary):
                  [[name, metric[1]] for name, metric in zip(metric_names, metrics)]))
 
 
-def qgis_project(transform, shape, epsg):
+def qgis_project(transform, shape, epsg, classes):
     root = ET.Element("qgis", {"version": "3.40.0", "projectname": "Soil Fertility GIS"})
     ET.SubElement(root, "title").text = "Soil Fertility GIS"
     properties = ET.SubElement(root, "properties")
@@ -214,15 +213,15 @@ def qgis_project(transform, shape, epsg):
         if identifier == "classes":
             renderer = ET.SubElement(ET.SubElement(layer, "pipe"), "rasterrenderer", {"type": "paletted", "band": "1", "opacity": "1", "alphaBand": "-1"})
             palette = ET.SubElement(renderer, "colorPalette")
-            for i, (label, color) in enumerate(zip(LABELS, COLORS), 1):
-                ET.SubElement(palette, "paletteEntry", {"value": str(i), "color": color, "label": label, "alpha": "255"})
+            for i, item in enumerate(classes, 1):
+                ET.SubElement(palette, "paletteEntry", {"value": str(i), "color": item["color"], "label": item["label"], "alpha": "255"})
     qgz = io.BytesIO()
     with zipfile.ZipFile(qgz, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("soil_fertility.qgs", b"<!DOCTYPE qgis>\n" + ET.tostring(root, encoding="utf-8"))
     return qgz.getvalue()
 
 
-def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, thresholds, ok, dem, distance, lags):
+def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, thresholds, ok, dem, distance, lags, p_method, k_method):
     output = io.BytesIO()
     crs = pts.crs
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as out:
@@ -232,22 +231,17 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
         out.writestr("samples.geojson", pts.to_crs(4326).to_json())
         if dashboard:
             vals = z[mask]
-            breaks = np.array([float(value) for value in thresholds.split(",")]) if thresholds.strip() else np.linspace(vals.min(), vals.max(), 6)[1:-1]
-            if len(breaks) != 4 or not np.isfinite(breaks).all() or (thresholds.strip() and not (np.diff(breaks) > 0).all()):
-                raise ValueError("Enter four increasing numeric class thresholds")
-            stats = []
+            definitions = classification(summary, thresholds, p_method, k_method)
             classified = np.zeros(mask.shape, dtype="uint8")
-            classified[mask] = np.searchsorted(breaks, vals, side="right") + 1
-            def limit(value):
-                return f"{value:.6g}"
-            ranges = [f"< {limit(breaks[0])}", *[f"{limit(a)} to < {limit(b)}" for a, b in zip(breaks, breaks[1:])], f"≥ {limit(breaks[-1])}"]
-            for i, (label, color, range_label) in enumerate(zip(LABELS, COLORS, ranges), 1):
+            classified[mask] = classify_values(vals, summary)
+            stats = []
+            for i, ((label, color), range_label) in enumerate(definitions, 1):
                 count = int((classified == i).sum())
-                stats.append(dict(label=label, color=color, range=range_label, area_ha=count * summary["resolution_m"]**2 / 10000, percent=count / len(vals) * 100))
+                stats.append(dict(label=label, color=color, range=range_label,
+                                  area_ha=count * summary["resolution_m"]**2 / 10000, percent=count / len(vals) * 100))
             lag, gamma = empirical(ok.X_ORIG, ok.Y_ORIG, ok.Z, distance, lags) if distance else (ok.lags, ok.semivariance)
             line = np.linspace(0, max(lag, default=distance * lags), 80)
-            summary.update(classes=stats, classification="Custom thresholds" if thresholds.strip() else "Equal intervals from predicted values",
-                           breaks=breaks.tolist(), variance=[float(v[mask].min()), float(v[mask].max())],
+            summary.update(classes=stats, variance=[float(v[mask].min()), float(v[mask].max())],
                            variogram=dict(lag=lag.tolist(), gamma=gamma.tolist(), distance=line.tolist(),
                                           fitted=ok.variogram_function(ok.variogram_model_parameters, line).tolist()))
             out.writestr("classification.tif", geotiff(classified, transform, crs, 0))
@@ -282,7 +276,7 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
                 for file in sorted(shp.iterdir()):
                     archive.write(file, file.name)
             out.writestr("soil_layers_shp.zip", shape_zip.getvalue())
-            out.writestr("soil_fertility.qgz", qgis_project(transform, z.shape, crs.to_string()))
+            out.writestr("soil_fertility.qgz", qgis_project(transform, z.shape, crs.to_string(), stats))
             summary["map_finding"] = map_finding(summary, vals)
             summary["findings"] = findings(summary)
             reports(out, summary)

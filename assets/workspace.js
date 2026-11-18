@@ -222,7 +222,9 @@ async function rasterLayer(zip, name, summary, outline) {
     if (name === 'prediction') {
       let category = 0;
       while (category < summary.breaks.length && value >= summary.breaks[category]) category++;
-      rgb = palette[category];
+      const code = summary.class_max != null && value > summary.class_max ? 5 :
+        (summary.class_codes?.[category] ?? category + 1);
+      rgb = palette[code - 1];
     } else {
       rgb = name === 'variance' ? [35 + 211 * fraction, 158 - 65 * fraction, 231 - 182 * fraction] :
         [62 + 181 * fraction, 83 + 152 * fraction, 73 + 145 * fraction];
@@ -314,7 +316,7 @@ function renderResults(area, points) {
   $('map-summary').textContent = info.map_finding.summary;
   $('map-interpretation').textContent = info.map_finding.conclusion;
   $('map-conclusion').hidden = false;
-  $('class-note').textContent = info.classification + ' · ' + (info.units || 'Source units');
+  $('class-note').textContent = [info.classification, info.units || 'Source units', info.classification_note].filter(Boolean).join(' · ');
   for (const metric of ['r2', 'rmse', 'mae', 'mbe']) $(metric).textContent = number(info.validation[metric]);
   swapChart($('scatter'), 'validation');
   swapChart($('variogram'), 'variogram');

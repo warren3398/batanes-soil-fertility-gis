@@ -22,8 +22,9 @@ def map_finding(summary, values):
     total = sum(row["area_ha"] for row in classes)
     largest = max(row["area_ha"] for row in classes)
     leaders = [row for row in classes if row["area_ha"] == largest]
-    lower = sum(row["percent"] for row in classes[:2])
-    higher = sum(row["percent"] for row in classes[-2:])
+    rated = [row for row in classes if row["label"] != "Outside guide range"]
+    lower = sum(row["percent"] for row in rated[:2])
+    higher = sum(row["percent"] for row in rated[-2:])
     if values.min() == values.max():
         pattern = "The prediction was uniform across the mapped area."
     elif len(leaders) == 1:
@@ -32,9 +33,10 @@ def map_finding(summary, values):
     else:
         labels = ", ".join(row["label"].lower() for row in leaders)
         pattern = f"The leading classes ({labels}) tied at {largest:,.2f} ha each ({leaders[0]['percent']:.1f}% each)."
-    basis = ("The class labels describe relative levels within this prediction map."
-             if summary["classification"].startswith("Equal intervals") else
-             "Class shares reflect the thresholds supplied for this run.")
+    basis = summary.get("classification_note", "Class shares reflect the thresholds supplied for this run.")
+    outside = sum(row["percent"] for row in classes if row["label"] == "Outside guide range")
+    if outside:
+        basis = f"{outside:.1f}% fell outside the guide range. " + basis
     return dict(
         summary=f"For {summary['parameter']} in {summary['study_area']}, the mapped area was {total:,.2f} ha. "
                 f"Predicted values ranged from {values.min():.5g} to {values.max():.5g}, "
@@ -143,8 +145,8 @@ def technical_pdf(summary, info, columns, rows, metrics):
                                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                                     ("LINEBELOW", (0, 0), (-1, -1), .35, RULE),
                                     ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+                                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
         return result
 
     def finding(item):
