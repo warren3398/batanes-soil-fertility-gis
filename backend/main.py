@@ -1,4 +1,4 @@
-import io, json, tempfile, zipfile, os
+import io, json, tempfile, zipfile, os, functools
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -10,6 +10,8 @@ from pykrige.ok import OrdinaryKriging
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 from shapely.geometry import mapping
+import boto3
+from botocore.config import Config
 app=FastAPI(title="Soil Fertility GIS API")
 app.add_middleware(CORSMiddleware,allow_origins=["https://warren3398.github.io","http://localhost:8000"],allow_methods=["*"],allow_headers=["*"])
 @app.get("/health")
@@ -26,13 +28,47 @@ def loadshape(b,folder):
     g=gpd.read_file(paths[0])
     if g.crs is None: raise ValueError("Shapefile must include a valid .prj")
     return g
-@app.post("/interpolate")
-async def interpolate(points:UploadFile=File(...),results:UploadFile=File(...),boundaries:UploadFile=File(...),province:str=Form(...),parameter:str=Form("N"),resolution:int=Form(100)):
+
+def r2client():
+    required=["R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY"]
+    missing=[k for k in required if not os.environ.get(k)]
+    if missing: raise HTTPException(503,"R2 boundary storage not configured: "+", ".join(missing))
+    return boto3.client("s3",endpoint_url="https://"+os.environ["R2_ACCOUNT_ID"]+".r2.cloudflarestorage.com",aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],region_name="auto",config=Config(signature_version="s3v4"))
+@functools.lru_cache(maxsize=1)
+def admin_catalog():
+    key=os.environ.get("R2_MUNICIPALITY_BOUNDARY_KEY","boundaries/municipalities.gpkg")
+    bucket=os.environ.get("R2_BUCKET","slopemap-gis-data")
+    try:
+        blob=r2client().get_object(Bucket=bucket,Key=key)["Body"].read()
+        with tempfile.NamedTemporaryFile(suffix=".gpkg") as f:
+            f.write(blob);f.flush()
+            g=gpd.read_file(f.name)
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(503,"Cannot load administrative boundaries from R2; check object key and access")
+    cols={c.lower():c for c in g.columns}
+    prov=next((cols[k] for k in ["province","prov_name","adm2_en","name_2"] if k in cols),None)
+    muni=next((cols[k] for k in ["municipality","mun_name","adm3_en","name_3"] if k in cols),None)
+    if not prov or not muni: raise HTTPException(503,"Boundary layer needs province and municipality name columns")
+    g=g.rename(columns={prov:"province",muni:"municipality"})
+    if g.crs is None: raise HTTPException(503,"Boundary layer has no CRS")
+    return g
+@app.get("/provinces")
+def provinces():
+    g=admin_catalog()
+    return {"provinces":sorted(g.province.dropna().astype(str).unique().tolist())}
+@app.get("/municipalities")
+def municipalities(province:str):
+    g=admin_catalog()
+    a=g[g.province.astype(str).str.casefold()==province.casefold()]
+    if a.empty: raise HTTPException(404,"Province not found")
+    return json.loads(a.to_crs(4326).to_json())
+\n@app.post("/interpolate")
+async def interpolate(points:UploadFile=File(...),results:UploadFile=File(...),province:str=Form(...),parameter:str=Form("N"),resolution:int=Form(100)):
     if resolution<10 or resolution>5000: raise HTTPException(400,"Resolution must be 10-5000 m")
     try:
         with tempfile.TemporaryDirectory() as d:
             pts=loadshape(await points.read(),Path(d)/"points")
-            bounds=loadshape(await boundaries.read(),Path(d)/"boundaries")
+            bounds=admin_catalog().copy()
             lab=pd.read_csv(io.BytesIO(await results.read()))
             for df,cols in [(pts,["sample_id"]),(lab,["sample_id",parameter]),(bounds,["province","municipality"])]:
                 missing=[x for x in cols if x not in df.columns]
