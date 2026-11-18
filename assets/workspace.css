@@ -15,7 +15,7 @@ html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--page); color: var(--ink); }
 [hidden] { display: none !important; }
 .app-header {
-  position: relative; isolation: isolate; display: flex; align-items: center; gap: 16px;
+  position: relative; isolation: isolate; display: flex; align-items: center;
   min-height: 136px; padding: 22px max(22px, calc((100vw - 1500px) / 2)); color: white;
   background: #0b3529;
 }
@@ -24,7 +24,6 @@ body { margin: 0; background: var(--page); color: var(--ink); }
   background: linear-gradient(90deg, #0b3529, #0b3529e8 15%, #0b352946 63%, #0b352916),
     url("fertility-banner.webp") right 54% / cover no-repeat;
 }
-.brand-mark { display: block; flex: none; border-radius: 50%; width: 62px; height: 62px; }
 h1 { font-size: clamp(27px, 3.6vw, 49px); margin: 0; letter-spacing: -.035em; line-height: 1.12; }
 .shell { min-height: calc(100vh - 174px); }
 .side-nav {
@@ -99,8 +98,7 @@ footer { display: flex; gap: 16px; justify-content: space-between; padding: 10px
 }
 @media (max-width: 620px) {
   .workspace, .right-column { grid-template-columns: minmax(0,1fr); }
-  .app-header { min-height: 110px; padding: 16px; gap: 12px; }
-  .brand-mark { width: 50px; height: 50px; }
+  .app-header { min-height: 110px; padding: 16px; }
   .app-header::before { inset: 0; opacity: .55; }
   .side-nav { padding: 5px 10px; gap: 0 4px; }
   .side-nav a { padding: 7px; font-size: 12px; }
