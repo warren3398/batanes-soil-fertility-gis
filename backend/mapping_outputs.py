@@ -152,6 +152,9 @@ def reports(out, summary):
     sheet.title = "Area statistics"
     for row in [*info, [], columns, *rows]:
         sheet.append(row)
+        for cell in sheet[sheet.max_row]:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
     sheet.column_dimensions["A"].width = 25
     sheet.column_dimensions["B"].width = 32
     validation = workbook.create_sheet("5-fold validation")
@@ -178,17 +181,18 @@ def reports(out, summary):
 def qgis_project(transform, shape, epsg):
     root = ET.Element("qgis", {"version": "3.40.0", "projectname": "Soil Fertility GIS"})
     ET.SubElement(root, "title").text = "Soil Fertility GIS"
+    properties = ET.SubElement(root, "properties")
+    spatial = ET.SubElement(properties, "SpatialRefSys")
+    ET.SubElement(spatial, "ProjectionsEnabled", {"type": "int"}).text = "1"
     projection = CRS.from_user_input(epsg)
     crs = ET.SubElement(ET.SubElement(root, "projectCrs"), "spatialrefsys", {"nativeFormat": "Wkt"})
     for key, value in [("wkt", projection.to_wkt()), ("srid", str(projection.to_epsg())),
                        ("authid", epsg), ("description", projection.name), ("geographicflag", "false")]:
         ET.SubElement(crs, key).text = value
-    canvas = ET.SubElement(root, "mapcanvas", {"name": "theMapCanvas", "annotationsVisible": "1"})
-    extent = ET.SubElement(canvas, "extent")
-    for key, value in zip(("xmin", "ymin", "xmax", "ymax"), array_bounds(*shape, transform)):
-        ET.SubElement(extent, key).text = str(value)
-    destination = ET.SubElement(canvas, "destinationsrs")
-    destination.append(ET.fromstring(ET.tostring(crs)))
+    bounds = dict(zip(("xmin", "ymin", "xmax", "ymax"), map(str, array_bounds(*shape, transform))))
+    view = ET.SubElement(root, "ProjectViewSettings", {"rotation": "0", "UseProjectScales": "0"})
+    extent = ET.SubElement(view, "DefaultViewExtent", bounds)
+    extent.append(ET.fromstring(ET.tostring(crs)))
     tree = ET.SubElement(root, "layer-tree-group", {"name": "", "checked": "Qt::Checked", "expanded": "1"})
     layers = ET.SubElement(root, "projectlayers")
     for identifier, name, source, provider, checked in [
@@ -237,7 +241,7 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
                 count = int((classified == i).sum())
                 stats.append(dict(label=label, color=color, range=range_label, area_ha=count * summary["resolution_m"]**2 / 10000, percent=count / len(vals) * 100))
             lag, gamma = empirical(ok.X_ORIG, ok.Y_ORIG, ok.Z, distance, lags) if distance else (ok.lags, ok.semivariance)
-            line = np.linspace(0, max(lag), 80)
+            line = np.linspace(0, max(lag, default=distance * lags), 80)
             summary.update(classes=stats, classification="Custom thresholds" if thresholds.strip() else "Equal intervals from predicted values",
                            breaks=breaks.tolist(), variance=[float(v[mask].min()), float(v[mask].max())],
                            variogram=dict(lag=lag.tolist(), gamma=gamma.tolist(), distance=line.tolist(),
@@ -254,7 +258,8 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
                     elevation = np.full(z.shape, NODATA, dtype="float32")
                     reproject(rasterio.band(source, 1), elevation, dst_crs=crs, dst_transform=transform, dst_nodata=NODATA)
                 elevation[~mask] = NODATA
-                valid = elevation != NODATA
+                valid = np.isfinite(elevation) & (elevation != NODATA)
+                elevation[~valid] = NODATA
                 if not valid.any():
                     raise ValueError("DEM does not overlap the study area")
                 summary["elevation"] = [float(elevation[valid].min()), float(elevation[valid].max())]
