@@ -9,25 +9,30 @@ let provinceBoundary;
 const api = location.hostname.endsWith('github.io') ? 'https://soil-fertility-gis-api.onrender.com' : '';
 const views = [...document.querySelectorAll('[data-view]')];
 const exports = [...document.querySelectorAll('[data-export]')];
-const map = L.map('map', { zoomSnap: .25 }).setView([20.55, 121.91], 9);
+const philippines = L.latLngBounds([4.55, 116.85], [21.25, 127.2]);
+const map = L.map('map', { zoomSnap: .25 });
+function fitPhilippines() {
+  map.fitBounds(philippines, { padding: [17, 17], animate: false });
+}
+fitPhilippines();
 const streets = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
-});
+}).addTo(map);
 const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics and contributors', maxZoom: 19,
-}).addTo(map);
-L.control.layers({ Satellite: satellite, Streets: streets }).addTo(map);
+});
+L.control.layers({ Streets: streets, Satellite: satellite }).addTo(map);
 L.control.scale({ imperial: false }).addTo(map);
 const home = L.control({ position: 'topleft' });
 home.onAdd = () => {
   const container = L.DomUtil.create('div', 'leaflet-bar');
   const button = L.DomUtil.create('button', 'map-home', container);
   button.type = 'button';
-  button.title = 'Zoom to study area';
+  button.title = 'Fit map to study area or Philippines';
   button.setAttribute('aria-label', button.title);
   button.textContent = '⌂';
   L.DomEvent.disableClickPropagation(container);
-  button.addEventListener('click', () => boundary.getBounds().isValid() ? fitBoundary() : map.setView([20.55, 121.91], 9));
+  button.addEventListener('click', () => boundary.getBounds().isValid() ? fitBoundary() : fitPhilippines());
   return container;
 };
 home.addTo(map);
@@ -76,8 +81,15 @@ function updateStudyArea() {
   note.textContent = custom ? 'The uploaded boundary will be used for this run.' : '';
   if (run) return;
   boundary.clearLayers();
-  if (custom || !provinceBoundary) return;
+  if (custom || !provinceBoundary) {
+    if (!province.value || custom) {
+      $('map-area').textContent = 'Philippines';
+      fitPhilippines();
+    }
+    return;
+  }
   const selected = municipality.value;
+  $('map-area').textContent = selected ? selected + ', ' + province.value : province.value;
   boundary.addData({
     type: 'FeatureCollection',
     features: provinceBoundary.features.filter((feature) => !selected || feature.properties.municipality === selected),
@@ -117,7 +129,6 @@ async function loadProvinces() {
     const data = await response.json();
     province.replaceChildren(new Option('Select province', ''));
     for (const name of data.provinces) province.add(new Option(name, name));
-    province.value = data.provinces.includes('Batanes') ? 'Batanes' : '';
     await showProvince();
   } catch (error) {
     province.replaceChildren(new Option('Catalog unavailable', ''));
@@ -143,28 +154,28 @@ function swapChart(canvas, kind) {
     const min = Math.min(...values);
     const max = Math.max(...values);
     datasets = [
-      { label: 'Out-of-fold prediction', data: points, backgroundColor: '#63b0ff', pointRadius: 3 },
-      { label: '1:1 reference', data: [{ x: min, y: min }, { x: max, y: max }], showLine: true, pointRadius: 0, borderColor: '#f2887e', borderDash: [5, 4] },
+      { label: 'Out-of-fold prediction', data: points, backgroundColor: '#1973a1', pointRadius: 3 },
+      { label: '1:1 reference', data: [{ x: min, y: min }, { x: max, y: max }], showLine: true, pointRadius: 0, borderColor: '#ab432f', borderDash: [5, 4] },
     ];
     const unitLabel = units ? ' (' + units + ')' : '';
     xTitle = 'Observed' + unitLabel;
     yTitle = 'Predicted' + unitLabel;
   } else {
     datasets = [
-      { label: 'Experimental', data: variogram.lag.map((x, i) => ({ x, y: variogram.gamma[i] })), backgroundColor: '#69befd', pointRadius: 3 },
+      { label: 'Experimental', data: variogram.lag.map((x, i) => ({ x, y: variogram.gamma[i] })), backgroundColor: '#1973a1', pointRadius: 3 },
       { label: 'Fitted ' + run.summary.model, data: variogram.distance.map((x, i) => ({ x, y: variogram.fitted[i] })),
-        showLine: true, pointRadius: 0, borderColor: '#f29174', borderWidth: 2 },
+        showLine: true, pointRadius: 0, borderColor: '#ab432f', borderWidth: 2 },
     ];
     xTitle = 'Distance (m)';
     yTitle = 'Semivariance';
   }
   canvas.hidden = false;
   canvas.previousElementSibling.hidden = true;
-  const axis = (text) => ({ title: { display: true, text, color: '#a6bad0' }, ticks: { color: '#b9cde0' }, grid: { color: '#ffffff17' } });
+  const axis = (text) => ({ title: { display: true, text, color: '#405c50' }, ticks: { color: '#405c50' }, grid: { color: '#22533c18' } });
   charts.set(canvas, new Chart(canvas, {
     type: 'scatter', data: { datasets },
     options: { animation: false, maintainAspectRatio: false, scales: { x: axis(xTitle), y: axis(yTitle) },
-      plugins: { legend: { labels: { color: '#e1eaf5', boxWidth: 11, font: { size: 10 } } } } },
+      plugins: { legend: { labels: { color: '#254c3c', boxWidth: 11, font: { size: 10 } } } } },
   }));
 }
 
@@ -291,6 +302,7 @@ for (const button of views) button.addEventListener('click', () => displayView(b
 
 function renderResults(area, points) {
   const info = run.summary;
+  $('map-area').textContent = info.study_area;
   boundary.clearLayers().addData(area);
   samples.clearLayers().addData(points);
   const rows = info.classes.map((item) => [swatch(item.color, item.label), item.range, number(item.area_ha, 2), number(item.percent, 2)]);

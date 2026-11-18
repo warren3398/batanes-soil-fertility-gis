@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Soil Fertility Map Generator</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="assets/workspace.css?v=4">
+  <link rel="stylesheet" href="assets/workspace.css?v=5">
   <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
-  <script defer src="assets/workspace.js?v=7"></script>
+  <script defer src="assets/workspace.js?v=8"></script>
 </head>
 <body>
 <header class="app-header">
@@ -19,7 +19,7 @@
 </header>
 <div class="shell">
   <nav class="side-nav" aria-label="Workspace">
-    <a class="active" href="#map-panel"><span aria-hidden="true">◈</span>Mapping</a>
+    <a href="#map-panel"><span aria-hidden="true">◈</span>Mapping</a>
     <a href="#inputs"><span aria-hidden="true">▤</span>Input data</a>
     <a href="#results"><span aria-hidden="true">▥</span>Results</a>
     <a href="#exports"><span aria-hidden="true">⇩</span>GIS exports</a>
@@ -73,7 +73,7 @@
       <section class="panel">
         <h2>Run processing</h2>
         <div class="panel-body stack">
-          <button type="submit" class="run">▶ Run geostatistical mapping</button>
+          <button type="submit" class="run"><span aria-hidden="true">›</span> Run geostatistical mapping</button>
           <progress id="progress" aria-label="Processing" hidden></progress>
           <p id="run-status" role="status">Choose a study area and upload your soil samples.</p>
         </div>
@@ -81,7 +81,10 @@
     </form>
     <div class="main-column">
       <section class="panel map-panel" id="map-panel">
-        <label class="result-selector" id="result-selector" hidden>Results for <select id="result-parameter"></select></label>
+        <div class="map-heading">
+          <div><h2>Soil fertility map</h2><p id="map-area">Philippines</p></div>
+          <label class="result-selector" id="result-selector" hidden>Results for <select id="result-parameter"></select></label>
+        </div>
         <div class="tabs" role="group" aria-label="Map and diagnostics">
           <button type="button" data-view="prediction" aria-pressed="true">Prediction map</button>
           <button type="button" data-view="samples" aria-pressed="false">Sample points</button>
