@@ -91,7 +91,6 @@ footer { display: flex; gap: 16px; justify-content: space-between; padding: 10px
 }
 .legend-ramp { height: 8px; border-radius: 2px; background: linear-gradient(90deg, #239ee7, #f65d31); }
 .legend-ramp.elevation { background: linear-gradient(90deg, #3e5349, #f3ebe2); }
-.leaflet-image-layer.raster { image-rendering: pixelated; }
 @media (min-width: 941px) and (max-height: 950px) {
   .inputs .panel-body { padding: 8px; }
   .inputs .stack { gap: 7px; }

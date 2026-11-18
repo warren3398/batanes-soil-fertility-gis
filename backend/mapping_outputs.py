@@ -10,12 +10,13 @@ from pyproj import CRS
 from pykrige import variogram_models
 from pykrige.ok import OrdinaryKriging
 from rasterio.io import MemoryFile
-from rasterio.transform import array_bounds
-from rasterio.warp import Resampling, calculate_default_transform, reproject
+from rasterio.transform import array_bounds, from_bounds
+from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
 from reportlab.lib import colors
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from scipy.linalg import pinv
+from scipy.ndimage import distance_transform_edt
 from scipy.optimize import least_squares
 from scipy.spatial.distance import cdist, pdist
 
@@ -125,14 +126,26 @@ def geotiff(array, transform, crs, nodata):
         return mem.read()
 
 
-def preview(array, transform, crs, nodata=NODATA):
+def preview(array, transform, crs):
     height, width = array.shape
-    dst, w, h = calculate_default_transform(crs, "EPSG:3857", width, height,
-                                             *array_bounds(height, width, transform))
-    image = np.full((h, w), nodata, dtype=array.dtype)
-    reproject(array, image, src_transform=transform, src_crs=crs, src_nodata=nodata,
-              dst_transform=dst, dst_crs="EPSG:3857", dst_nodata=nodata, resampling=Resampling.nearest)
-    return geotiff(image, dst, "EPSG:3857", nodata)
+    bounds = array_bounds(height, width, transform)
+    _, w, h = calculate_default_transform(crs, "EPSG:3857", width, height, *bounds)
+    destination = from_bounds(*transform_bounds(crs, "EPSG:3857", *bounds), w, h)
+    missing = array == NODATA
+    # Fill edge support for bilinear resampling. The browser clips to the exact
+    # study polygon; these extra values are never used in GIS exports or stats.
+    nearest = distance_transform_edt(missing, return_distances=False, return_indices=True)
+    filled = array[tuple(nearest)]
+    image = np.full((h, w), NODATA, dtype=array.dtype)
+    reproject(filled, image, src_transform=transform, src_crs=crs, src_nodata=NODATA,
+              dst_transform=destination, dst_crs="EPSG:3857", dst_nodata=NODATA,
+              resampling=Resampling.bilinear)
+    # A projected bounding rectangle can extend beyond the source at its corners.
+    missing = image == NODATA
+    if missing.any() and not missing.all():
+        nearest = distance_transform_edt(missing, return_distances=False, return_indices=True)
+        image[missing] = image[tuple(nearest[:, missing])]
+    return geotiff(image, destination, "EPSG:3857", NODATA)
 
 
 def reports(out, summary):
@@ -247,7 +260,9 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
                            variogram=dict(lag=lag.tolist(), gamma=gamma.tolist(), distance=line.tolist(),
                                           fitted=ok.variogram_function(ok.variogram_model_parameters, line).tolist()))
             out.writestr("classification.tif", geotiff(classified, transform, crs, 0))
-            out.writestr("map_classes.tif", preview(classified, transform, crs, 0))
+            out.writestr("map_prediction.tif", preview(z, transform, crs))
+            outline = area.to_crs(4326).geometry.make_valid().union_all()
+            out.writestr("map_boundary.geojson", json.dumps(outline.__geo_interface__))
             out.writestr("map_variance.tif", preview(v, transform, crs))
             if dem:
                 if not (dem.filename or "").lower().endswith((".tif", ".tiff")):

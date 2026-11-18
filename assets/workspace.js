@@ -28,7 +28,7 @@ home.onAdd = () => {
   return container;
 };
 home.addTo(map);
-const boundary = L.geoJSON(null, { style: { color: '#e4effc', weight: 2, fill: false } }).addTo(map);
+const boundary = L.geoJSON(null, { style: { color: '#e4effc', weight: 2, fill: false, smoothFactor: 0 } }).addTo(map);
 const samples = L.geoJSON(null, {
   pointToLayer(feature, point) {
     return L.circleMarker(point, { radius: 4, weight: 1.3, color: '#182530', fillColor: '#fff5c5', fillOpacity: 1 });
@@ -147,16 +147,36 @@ function swatch(color, text) {
   return item;
 }
 
-async function rasterLayer(zip, name, summary) {
-  const filename = { prediction: 'map_classes.tif', variance: 'map_variance.tif', elevation: 'map_elevation.tif' }[name];
+function clipRaster(context, geometry, project) {
+  if (geometry.type === 'GeometryCollection') {
+    for (const part of geometry.geometries) clipRaster(context, part, project);
+    return;
+  }
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] :
+    geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
+  for (const rings of polygons) {
+    for (const ring of rings) {
+      ring.forEach(([lon, lat], index) => {
+        const [x, y] = project(lon, lat);
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.closePath();
+    }
+  }
+}
+
+async function rasterLayer(zip, name, summary, outline) {
+  const filename = { prediction: 'map_prediction.tif', variance: 'map_variance.tif', elevation: 'map_elevation.tif' }[name];
   const tif = await GeoTIFF.fromArrayBuffer(await zip.file(filename).async('arraybuffer'));
   const image = await tif.getImage();
   const [west, south, east, north] = image.getBoundingBox();
   const projection = L.CRS.EPSG3857;
   const bounds = L.latLngBounds(projection.unproject(L.point(west, south)), projection.unproject(L.point(east, north)));
-  const width = image.getWidth();
-  const height = image.getHeight();
-  const pixels = await image.readRasters({ interleave: true });
+  const scale = Math.min(12, 2400 / Math.max(image.getWidth(), image.getHeight()));
+  const width = Math.max(1, Math.round(image.getWidth() * scale));
+  const height = Math.max(1, Math.round(image.getHeight() * scale));
+  const pixels = await image.readRasters({ width, height, interleave: true, resampleMethod: 'bilinear' });
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -166,15 +186,32 @@ async function rasterLayer(zip, name, summary) {
   const range = summary[name];
   for (let i = 0; i < pixels.length; i++) {
     const value = pixels[i];
-    if (name === 'prediction' ? !value : value === -9999 || !Number.isFinite(value)) continue;
+    if (value === -9999 || !Number.isFinite(value)) continue;
     const fraction = range ? Math.max(0, Math.min(1, (value - range[0]) / (range[1] - range[0] || 1))) : 0;
-    const rgb = name === 'prediction' ? palette[value - 1] :
-      name === 'variance' ? [35 + 211 * fraction, 158 - 65 * fraction, 231 - 182 * fraction] :
+    let rgb;
+    if (name === 'prediction') {
+      let category = 0;
+      while (category < summary.breaks.length && value >= summary.breaks[category]) category++;
+      rgb = palette[category];
+    } else {
+      rgb = name === 'variance' ? [35 + 211 * fraction, 158 - 65 * fraction, 231 - 182 * fraction] :
         [62 + 181 * fraction, 83 + 152 * fraction, 73 + 145 * fraction];
-    rgba.data.set([...rgb, 224], i * 4);
+    }
+    rgba.data.set(rgb, i * 4);
+    rgba.data[i * 4 + 3] = 224;
   }
-  context.putImageData(rgba, 0, 0);
-  return L.imageOverlay(canvas.toDataURL(), bounds, { opacity: .95, className: 'raster' });
+  const raster = document.createElement('canvas');
+  raster.width = width;
+  raster.height = height;
+  raster.getContext('2d').putImageData(rgba, 0, 0);
+  context.beginPath();
+  clipRaster(context, outline, (lon, lat) => {
+    const point = projection.project(L.latLng(lat, lon));
+    return [(point.x - west) * width / (east - west), (north - point.y) * height / (north - south)];
+  });
+  context.clip('evenodd');
+  context.drawImage(raster, 0, 0);
+  return L.imageOverlay(canvas.toDataURL(), bounds, { opacity: .95 });
 }
 
 function displayView(next) {
@@ -268,9 +305,9 @@ async function mapParameter(data) {
   const blob = await response.blob();
   const zip = await JSZip.loadAsync(blob);
   const read = async (filename) => JSON.parse(await zip.file(filename).async('string'));
-  const [summary, area, points] = await Promise.all([read('summary.json'), read('municipalities.geojson'), read('samples.geojson')]);
+  const [summary, area, points, outline] = await Promise.all([read('summary.json'), read('municipalities.geojson'), read('samples.geojson'), read('map_boundary.geojson')]);
   const names = summary.elevation ? ['prediction', 'variance', 'elevation'] : ['prediction', 'variance'];
-  const layers = await Promise.all(names.map((name) => rasterLayer(zip, name, summary)));
+  const layers = await Promise.all(names.map((name) => rasterLayer(zip, name, summary, outline)));
   return { blob, zip, summary, area, points, names, layers };
 }
 
