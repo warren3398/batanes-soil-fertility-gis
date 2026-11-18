@@ -1,6 +1,128 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Batanes Soil Fertility GIS Demo</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>body{margin:0;font:15px system-ui;background:#f2f6f4;color:#173b30}header{background:#124c3e;color:white;padding:18px 24px}header h1{margin:0;font-size:24px}header p{margin:5px 0 0}.wrap{padding:16px;max-width:1400px;margin:auto}.notice{background:#fff3d2;padding:12px;border-left:5px solid #e5a100;margin-bottom:14px}.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.stat{background:white;border-radius:10px;padding:13px 20px;flex:1;min-width:110px}.stat b{font-size:25px;display:block}.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}select,button{padding:10px;border:1px solid #cbd6d0;border-radius:8px;background:white}button{cursor:pointer;background:#14624b;color:white}.layout{display:grid;grid-template-columns:2fr 1fr;gap:14px}#map{height:570px;border-radius:12px}.panel{background:white;border-radius:12px;padding:14px;overflow:auto;max-height:570px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:7px;border-bottom:1px solid #e4e9e6}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:5px}@media(max-width:850px){.layout{grid-template-columns:1fr}#map{height:430px}}</style></head><body><header><h1>Batanes Soil Fertility GIS</h1><p>Upload-based dashboard · CSV / GeoJSON</p></header><div class="wrap"><div class="notice"><strong>DEMO / SYNTHETIC COORDINATES:</strong> Map markers are simulated, not actual BSWM sample locations. Fertility ratings are categorical and must not be interpreted as measured NPK or kriging results.</div><div class="controls"><label>Upload CSV or GeoJSON <input id="upload" type="file" accept=".csv,.geojson,.json"></label><button id="clear">Clear</button></div><p id="uploadStatus">No dataset uploaded.</p><section style="background:#10253b;color:#fff;padding:18px;border-radius:12px;margin-bottom:15px"><h2>Geostatistical Interpolation</h2><p>Upload sampling points (SHP ZIP), and laboratory results (CSV). Choose a province from the shared boundary catalog and run Ordinary Kriging. Actual numerical lab results are required.</p><form id="krigingForm" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end"><label>Sampling points ZIP<br><input name="points" type="file" accept=".zip" required></label><label>Lab results CSV<br><input name="results" type="file" accept=".csv" required></label><label>Province<br><select name="province" id="provinceSelect" required><option value="">Loading provinces...</option></select></label><label>Parameter<br><select name="parameter"><option>N</option><option>P</option><option>K</option><option>pH</option></select></label><label>Resolution (m)<br><input name="resolution" type="number" value="100" min="10" max="5000"></label><button type="submit">Run Kriging & Download ZIP</button></form><p id="krigingStatus">Loading province catalog…</p></section><div class="stats" id="stats"></div><div class="controls"><select id="municipality"><option value="">All municipalities</option></select><select id="rating"><option value="">All fertility ratings</option></select><button id="download">Export filtered GeoJSON</button></div><div class="layout"><div id="map"></div><div class="panel"><h3>Sampling records</h3><div id="legend"></div><table><thead><tr><th>ID</th><th>LMU</th><th>Municipality</th><th>Rating</th></tr></thead><tbody id="records"></tbody></table></div></div></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const raw="27|Uyugan|Ivana|Radiwan|M|20.37642|121.925291\n28E3|Bolinao|Itbayat|Raele|H|20.782486|121.832728\n28|Basco|Basco|Kayhuvokan|M|20.441289|121.969101\n31E2|Sabtang|Sabtang|Savidug|L|20.334915|121.868776\n47E3|Mayan|Mahatao|Kaumbakan|L|20.409643|121.952835\n47E3|Basco|Mahatao|Uvoy|L|20.407055|121.957857\n47E2|Sabtang|Sabtang|Sumnanga|L|20.327856|121.862101\n47E2|Basco|Basco|San Antonio|H|20.445406|121.974895\n47E3|Mayan|Mahatao|Kaumbakan|VL|20.41612|121.956728\n47|Uyugan|Sabtang|Sumnanga|VL|20.330335|121.864306\n49E3|Sabtang|Sabtang|Savidug|M|20.336331|121.863713\n50E2|Uyugan|Ivana|Radiwan|M|20.368835|121.91282\n50E2|Sabtang|Ivana|Radiwan|H|20.376385|121.914888\n50E2|Uyugan|Uyugan|Kayvaluganan|L|20.35512|121.940962\n50E3|Uyugan|Uyugan|Kayuganan|H|20.356827|121.934452\n51E3|Uyugan|Basco|Kaychanarianan|H|20.447425|121.969013\n51E3|Uyugan|Basco|Kayhuvokan|H|20.452512|121.963919\n51E3|Basco|Basco|San Joaquin|VH|20.452516|121.967732\n51E3|Uyugan|Mahatao|Kaumbakan|M|20.416544|121.952872\n51E3|Uyugan|Basco|Chanarian|M|20.447028|121.973626\n51E3|Basco|Basco|Kaychanarianan|H|20.447374|121.967314\n51E3|Uyugan|Basco|Chanarian|VL|20.452218|121.975768\n59E2|Bolinao|Itbayat|San Rafael|L|20.789312|121.833773\n59E2|Bolinao|Itbayat|Sta. Lucia|L|20.780143|121.841025\n59E2|Bolinao|Itbayat|Sta. Rosa|H|20.790391|121.838944\n59E2|Faraon|Itbayat|Sta. Rosa|VH|20.79106|121.842025\n59E3|Bolinao|Itbayat|Raele|M|20.78597|121.833053\n59E3|Bolinao|Itbayat|Raele|M|20.78883|121.835867\n59E3|Bolinao|Itbayat|Sta. Maria|H|20.784462|121.840558\n59E3|Bolinao|Itbayat|Sta. Maria|L|20.781449|121.847334\n66E2|Faraon|Sabtang|Malakdang|M|20.328488|121.86503\n66E3|Faraon|Sabtang|Malakdang|VH|20.32791|121.862679\n77E3|Uyugan|Uyugan|Kayvaluganan|M|20.343675|121.936237\n78E2|Sabtang|Sabtang|Savidug|M|20.335692|121.868127\n7F2E2|Sabtang|Sabtang|Sinakan|M|20.338153|121.873924\n81E2|Uyugan|Ivana|Salagao|M|20.36353|121.925285\n81E3|Basco|Mahatao|Uvoy|M|20.409712|121.954987\n81E3|Luisana|Sabtang|Savidug|L|20.327664|121.869681\n81E3|Umingan|Ivana|San Vicente|L|20.376222|121.914319\n81E3|Umingan|Ivana|San Vicente|H|20.369218|121.914317\n111E3|Basco|Mahatao|Uvoy|M|20.422845|121.957203\n117E3|Basco|Basco|San Joaquin|M|20.445835|121.976067\n117E3|Uyugan|Ivana|Radiwan|H|20.366268|121.917586\n117E3|Umingan|Mahatao|Hanib|L|20.420175|121.953622\n117E3|Umingan|Mahatao|Kaumbakan|M|20.407411|121.947403\n119E3|Uyugan|Ivana|Tuhel|VL|20.37128|121.921056\n119E3|Luisana|Sabtang|Chavayan|M|20.33445|121.865004\n119E3|Luisana|Sabtang|Chavayan|L|20.332587|121.865699\n119E3|Basco|Uyugan|Imnajbu|L|20.344329|121.936339\n119E3|Uyugan|Uyugan|Imnajbu|M|20.351849|121.942911\n119E3|Uyugan|Uyugan|Imnajbu|L|20.350495|121.938733\n119E3|Uyugan|Uyugan|Imnajbu|VH|20.351864|121.939597\n119E3|Basco|Uyugan|Imnajbu|L|20.355255|121.947344\n119E3|Uyugan|Uyugan|Kayvaluganan|VL|20.344357|121.94615\n119|Uyugan|Sabtang|Nakanmuan|VL|20.335941|121.875869";const sampleTemplate=raw.split('\n').map((line,i)=>{let a=line.split('|');return{id:'BAT-'+String(i+1).padStart(3,'0'),lmu:a[0],soil:a[1],municipality:a[2],barangay:a[3],rating:a[4],lat:+a[5],lng:+a[6]}});let data=[];const colors={VL:'#c62828',L:'#f28c28',M:'#e6c747',H:'#79bd65',VH:'#267b45'};const names={VL:'Very Low',L:'Low',M:'Moderate',H:'High',VH:'Very High'};const map=L.map('map').setView([20.52,121.91],10);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(map);const layer=L.layerGroup().addTo(map);const muni=document.getElementById('municipality'),rating=document.getElementById('rating');function refreshOptions(){muni.innerHTML='<option value="">All municipalities</option>';[...new Set(data.map(x=>x.municipality))].sort().forEach(x=>muni.add(new Option(x,x)));muni.value='';rating.value=''}Object.keys(colors).forEach(x=>rating.add(new Option(names[x],x)));document.getElementById('legend').innerHTML=Object.keys(colors).map(x=>'<span style="display:inline-block;margin:0 9px 9px 0"><i class="dot" style="background:'+colors[x]+'"></i>'+names[x]+'</span>').join('');let current=[];function render(){current=data.filter(x=>(!muni.value||x.municipality===muni.value)&&(!rating.value||x.rating===rating.value));layer.clearLayers();current.forEach(x=>L.circleMarker([x.lat,x.lng],{radius:7,color:'#fff',weight:1.5,fillColor:colors[x.rating],fillOpacity:.95}).bindPopup('<b>'+x.id+'</b><p>LMU: '+x.lmu+'<br>Soil series: '+x.soil+'<br>Municipality: '+x.municipality+'<br>Barangay: '+x.barangay+'<br>Fertility: '+names[x.rating]+'</p><small>Synthetic coordinates</small>').addTo(layer));document.getElementById('stats').innerHTML='<div class="stat"><b>'+current.length+'</b>Displayed samples</div>'+Object.keys(colors).map(k=>'<div class="stat"><b>'+current.filter(x=>x.rating===k).length+'</b>'+names[k]+'</div>').join('');document.getElementById('records').innerHTML=current.map(x=>'<tr><td>'+x.id+'</td><td>'+x.lmu+'</td><td>'+x.municipality+'</td><td><i class="dot" style="background:'+colors[x.rating]+'"></i>'+x.rating+'</td></tr>').join('');}muni.onchange=rating.onchange=render;document.getElementById('download').onclick=()=>{const obj={type:'FeatureCollection',features:current.map(x=>({type:'Feature',geometry:{type:'Point',coordinates:[x.lng,x.lat]},properties:{...x,coordinate_status:'SYNTHETIC_DEMO_NOT_ACTUAL_SAMPLE'}}))};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj)],{type:'application/geo+json'}));a.download='batanes_fertility_synthetic.geojson';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
-function csvRows(t){let rows=[],row=[],field='',quoted=false;for(let i=0;i<t.length;i++){let c=t[i];if(c==='"'){if(quoted&&t[i+1]==='"'){field+='"';i++}else quoted=!quoted}else if(c===','&&!quoted){row.push(field);field=''}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&t[i+1]==='\n')i++;row.push(field);if(row.some(v=>v.trim()))rows.push(row);row=[];field=''}else field+=c}row.push(field);if(row.some(v=>v.trim()))rows.push(row);return rows}
-function normalize(p,i){const keys=Object.keys(p),get=(...names)=>{const key=keys.find(k=>names.includes(k.toLowerCase().replace(/[^a-z0-9]/g,'')));return key===undefined?'':p[key]};return{id:String(get('sampleid','id')||'UP-'+(i+1)),lmu:String(get('lmu','lmucode')),soil:String(get('soilseries','soil')),municipality:String(get('municipality')),barangay:String(get('barangay')),rating:String(get('fertilityrating','fertility','rating')).toUpperCase().trim(),lat:Number(get('latitude','lat')),lng:Number(get('longitude','lon','lng','long'))}}
-document.getElementById('upload').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const text=await file.text();let points;if(/\.csv$/i.test(file.name)){const rows=csvRows(text.replace(/^\uFEFF/,'')),headers=rows.shift();points=rows.map((r,i)=>normalize(Object.fromEntries(headers.map((h,j)=>[h,r[j]||''])),i))}else{const geo=JSON.parse(text);if(geo.type!=='FeatureCollection')throw Error('Expected GeoJSON FeatureCollection');points=geo.features.map((f,i)=>{if(f.geometry?.type!=='Point')throw Error('Point features only');return normalize({...f.properties,latitude:f.geometry.coordinates[1],longitude:f.geometry.coordinates[0]},i)})}if(!points.length)throw Error('No points');for(let i=0;i<points.length;i++){const p=points[i];if(!Number.isFinite(p.lat)||!Number.isFinite(p.lng)||Math.abs(p.lat)>90||Math.abs(p.lng)>180||!colors[p.rating])throw Error('Invalid coordinate or rating at row '+(i+1))}data=points;refreshOptions();render();map.fitBounds(L.latLngBounds(data.map(p=>[p.lat,p.lng])).pad(.2),{maxZoom:12});document.getElementById('uploadStatus').textContent='Loaded '+data.length+' points from '+file.name}catch(err){document.getElementById('uploadStatus').textContent='Upload error: '+err.message}};
-document.getElementById('clear').onclick=()=>{data=[];document.getElementById('upload').value='';document.getElementById('uploadStatus').textContent='No dataset uploaded.';refreshOptions();render()};
-refreshOptions();render();const API=location.hostname==='soil-fertility-gis-api.onrender.com'?'':'https://soil-fertility-gis-api.onrender.com';const provinceSelect=document.getElementById('provinceSelect');fetch(API+'/provinces').then(r=>{if(!r.ok)throw Error('Boundary catalog unavailable');return r.json()}).then(j=>{provinceSelect.innerHTML='<option value="">Select province</option>';j.provinces.forEach(p=>provinceSelect.add(new Option(p,p)));document.getElementById('krigingStatus').textContent=''}).catch(e=>{provinceSelect.innerHTML='<option value="">Province database unavailable</option>';document.getElementById('krigingStatus').textContent=e.message});provinceSelect.addEventListener('change',async()=>{if(!provinceSelect.value)return;try{const r=await fetch(API+'/municipalities?province='+encodeURIComponent(provinceSelect.value));if(!r.ok)throw Error('Municipalities unavailable');const g=await r.json();if(window.adminLayer)map.removeLayer(window.adminLayer);window.adminLayer=L.geoJSON(g,{style:{color:'#2271c3',weight:2,fillOpacity:0.06}}).addTo(map);map.fitBounds(window.adminLayer.getBounds())}catch(e){document.getElementById('krigingStatus').textContent=e.message}});const krigingForm=document.getElementById('krigingForm');krigingForm.addEventListener('submit',async e=>{e.preventDefault();const status=document.getElementById('krigingStatus');status.textContent='Processing... this may take several minutes.';const form=new FormData(krigingForm);try{const resp=await fetch(API+'/interpolate',{method:'POST',body:form});if(!resp.ok){let j=await resp.json().catch(()=>({detail:resp.statusText}));throw Error(j.detail||'Processing failed')}const blob=await resp.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='soil_fertility_outputs.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);status.textContent='Completed. GIS outputs downloaded.'}catch(err){status.textContent='Processing unavailable: '+err.message}});</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Soil Fertility GIS | Mapping workspace</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="assets/workspace.css">
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+  <script defer src="assets/workspace.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <span class="brand-mark" aria-hidden="true">🌱</span>
+  <div><h1>Soil Fertility GIS</h1><p>Geostatistical mapping workspace</p></div>
+  <span class="header-context">Ordinary Kriging <span> / </span> Batanes, Philippines</span>
+</header>
+<div class="shell">
+  <nav class="side-nav" aria-label="Workspace">
+    <a class="active" href="#map-panel"><span aria-hidden="true">◈</span>Mapping</a>
+    <a href="#inputs"><span aria-hidden="true">▤</span>Input data</a>
+    <a href="#results"><span aria-hidden="true">▥</span>Results</a>
+    <a href="#exports"><span aria-hidden="true">⇩</span>GIS exports</a>
+    <a href="records.html"><span aria-hidden="true">⊙</span>Sample records</a>
+  </nav>
+  <main class="workspace">
+    <form id="mapping-form" class="inputs">
+      <section class="panel" id="inputs">
+        <h2>Input data</h2>
+        <div class="panel-body stack">
+          <label>Soil samples <input name="points" type="file" accept=".csv,.xlsx,.zip" required></label>
+          <small>CSV or XLSX with latitude, longitude and parameter, or a point Shapefile ZIP.</small>
+          <label>Lab results <small>Optional</small><input name="results" type="file" accept=".csv,.xlsx"></label>
+          <small>Join a separate lab table using sample_id.</small>
+          <label>Province <select name="province" id="province"><option value="">Loading provinces…</option></select></label>
+          <label>Study boundary <small>Optional override</small><input name="boundary" type="file" accept=".zip"></label>
+          <label>Elevation model <small>Optional</small><input name="dem" type="file" accept=".tif,.tiff"></label>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Mapping parameters</h2>
+        <div class="panel-body stack">
+          <label class="split">Soil parameter <select name="parameter"><option value="N">Nitrogen (N)</option><option value="P">Phosphorus (P)</option><option value="K">Potassium (K)</option><option value="pH">pH</option></select></label>
+          <label class="split">Method <span class="field-value">Ordinary Kriging</span></label>
+          <label class="split">Resolution (m) <input type="number" name="resolution" min="10" max="5000" value="500" required></label>
+          <label class="split">Units <input name="units" placeholder="e.g. %, mg/kg" maxlength="32"></label>
+          <details open><summary>Variogram settings</summary>
+            <div class="stack details-body">
+              <label class="split">Model <select name="model"><option>Spherical</option><option>Exponential</option><option>Gaussian</option><option>Linear</option><option>Power</option></select></label>
+              <label class="split">Lag distance (m) <input name="lag_distance" type="number" min="0" step="any" value="0"></label>
+              <label class="split">Number of lags <input name="lags" type="number" min="3" max="30" value="12" required></label>
+              <small>Use 0 for data-driven lag spacing. The model is fitted to the samples.</small>
+            </div>
+          </details>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Run processing</h2>
+        <div class="panel-body stack">
+          <button type="submit" class="run">▶ Run geostatistical mapping</button>
+          <progress id="progress" aria-label="Processing" hidden></progress>
+          <p id="run-status" role="status">Choose a study area and upload your soil samples.</p>
+        </div>
+      </section>
+    </form>
+    <div class="main-column">
+      <section class="panel map-panel" id="map-panel">
+        <div class="tabs" role="group" aria-label="Map and diagnostics">
+          <button type="button" data-view="prediction" aria-pressed="true">Prediction map</button>
+          <button type="button" data-view="samples" aria-pressed="false">Sample points</button>
+          <button type="button" data-view="variogram" aria-pressed="false">Variogram</button>
+          <button type="button" data-view="variance" aria-pressed="false">Uncertainty</button>
+          <button type="button" data-view="validation" aria-pressed="false">Cross-validation</button>
+          <button type="button" data-view="elevation" aria-pressed="false" hidden>Elevation</button>
+        </div>
+        <div class="map-stage">
+          <div id="map" aria-label="Study area map"></div>
+          <div id="legend" class="legend" hidden></div>
+        </div>
+        <div id="large-chart" class="large-chart" hidden><p>Run mapping to generate diagnostics.</p><canvas hidden></canvas></div>
+      </section>
+      <section class="panel" id="results">
+        <h2>Summary &amp; area statistics</h2>
+        <div class="panel-body">
+          <div class="table-wrap"><table><thead><tr><th>Fertility class</th><th>Range</th><th>Area (ha)</th><th>Share (%)</th></tr></thead>
+            <tbody id="classes"><tr><td colspan="4" class="empty">Area statistics appear after processing.</td></tr></tbody></table></div>
+          <details class="class-settings"><summary>Classification settings</summary>
+            <label>Four class thresholds <input form="mapping-form" name="thresholds" placeholder="e.g. 0.10, 0.20, 0.40, 0.60"></label>
+            <small>Leave blank for five equal intervals from the prediction range. Enter thresholds in the same units as your samples.</small>
+          </details>
+          <p id="class-note" class="muted"></p>
+        </div>
+      </section>
+    </div>
+    <aside class="right-column">
+      <section class="panel">
+        <h2>Model validation <small>5-fold</small></h2>
+        <div class="panel-body">
+          <table><thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
+            <tbody><tr><th scope="row">R²</th><td id="r2">—</td></tr>
+            <tr><th scope="row">RMSE</th><td id="rmse">—</td></tr>
+            <tr><th scope="row">MAE</th><td id="mae">—</td></tr>
+            <tr><th scope="row">Mean bias</th><td id="mbe">—</td></tr></tbody></table>
+        </div>
+      </section>
+      <section class="panel"><h2>Observed vs. predicted</h2><div class="chart-frame"><p>Awaiting a completed run</p><canvas id="scatter" hidden></canvas></div></section>
+      <section class="panel"><h2>Experimental variogram</h2><div class="chart-frame"><p>Awaiting a completed run</p><canvas id="variogram" hidden></canvas></div></section>
+      <section class="panel" id="exports">
+        <h2>Export outputs</h2>
+        <div class="panel-body export-grid">
+          <button type="button" data-export="rasters" disabled>GeoTIFF</button>
+          <button type="button" data-export="soil_layers_shp.zip" disabled>Shapefile</button>
+          <button type="button" data-export="soil_layers.gpkg" disabled>GeoPackage</button>
+          <button type="button" data-export="qgis" disabled>QGIS project</button>
+          <button type="button" data-export="soil_report.xlsx" disabled>Excel report</button>
+          <button type="button" data-export="soil_report.pdf" disabled>PDF report</button>
+          <button type="button" data-export="all" class="wide" disabled>Download all outputs</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+</div>
+<footer><span id="footer-status">Ready</span><span id="run-meta">Ordinary Kriging</span><span id="timer"></span></footer>
+</body>
+</html>
