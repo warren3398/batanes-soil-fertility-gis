@@ -127,7 +127,7 @@ def municipalities(province:str):
 def interpolate(
     points: UploadFile = File(...), results: UploadFile | None = File(None),
     boundary: UploadFile | None = File(None), dem: UploadFile | None = File(None),
-    province: str = Form(""), parameter: str = Form("N"), resolution: int = Form(100),
+    province: str = Form(""), municipality: str = Form(""), parameter: str = Form("N"), resolution: int = Form(100),
     model: str = Form("spherical"), lags: int = Form(12), lag_distance: float = Form(0),
     dashboard: bool = Form(False), thresholds: str = Form(""), units: str = Form(""),
     manual_variogram: str = Form(""),
@@ -146,9 +146,33 @@ def interpolate(
         with tempfile.TemporaryDirectory() as d:
             folder = Path(d)
             if boundary:
-                area = loadshape(boundary.file.read(), folder / "boundary")
+                suffix = Path(boundary.filename or "").suffix.lower()
+                if suffix == ".zip":
+                    area = loadshape(boundary.file.read(), folder / "boundary")
+                elif suffix in {".geojson", ".json"}:
+                    data = json.load(boundary.file)
+                    if not isinstance(data, dict):
+                        raise ValueError("Study boundary must be a polygon GeoJSON")
+                    if data.get("type") in {"Polygon", "MultiPolygon"}:
+                        data = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": data, "properties": {}}]}
+                    elif data.get("type") == "Feature":
+                        data = {"type": "FeatureCollection", "features": [data]}
+                    if data.get("type") != "FeatureCollection":
+                        raise ValueError("Study boundary must be a polygon GeoJSON")
+                    features = data.get("features")
+                    if not isinstance(features, list) or not features or any(
+                        not isinstance(feature, dict) or feature.get("type") != "Feature"
+                        or not isinstance(feature.get("geometry"), dict)
+                        or feature["geometry"].get("type") not in {"Polygon", "MultiPolygon"}
+                        for feature in features
+                    ):
+                        raise ValueError("Study boundary must contain polygon features")
+                    area = gpd.GeoDataFrame.from_features(features, crs=4326)
+                else:
+                    raise ValueError("Upload the study boundary as a Shapefile ZIP or GeoJSON")
                 if area.empty or not area.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
                     raise ValueError("Study boundary must contain polygons")
+                study_area = "Custom study area"
             else:
                 if not province:
                     raise ValueError("Choose a province or upload a study boundary")
@@ -156,6 +180,12 @@ def interpolate(
                 area = bounds[bounds.province.str.casefold() == province.casefold()].copy()
                 if area.empty:
                     raise ValueError("Province not found in the boundary catalog")
+                study_area = str(area.province.iloc[0])
+                if municipality.strip():
+                    area = area[area.municipality.str.casefold() == municipality.strip().casefold()]
+                    if area.empty:
+                        raise ValueError("Municipality not found in the selected province")
+                    study_area = f"{area.municipality.iloc[0]}, {study_area}"
             area = area.to_crs(4326)
             poly = area.geometry.make_valid().union_all()
             suffix = Path(points.filename or "").suffix.lower()
@@ -223,7 +253,7 @@ def interpolate(
             z = np.full(mask.shape, -9999, dtype="float32")
             v = z.copy()
             predict_grid(ok, z, v, rows, cols, minx, maxy, resolution)
-            summary = dict(province=province or "Custom study area", parameter=parameter, samples=len(pts),
+            summary = dict(province=province if not boundary else "Custom study area", study_area=study_area, parameter=parameter, samples=len(pts),
                            resolution_m=resolution, method="ordinary_kriging", model=model, crs=utm.to_string(),
                            units=units.strip()[:32], validation=validation, variogram_fit="manual" if manual_variogram else "automatic")
             output = write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard,

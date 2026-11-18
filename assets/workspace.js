@@ -3,6 +3,9 @@
 const $ = (id) => document.getElementById(id);
 const form = $('mapping-form');
 const province = $('province');
+const municipality = $('municipality');
+const boundaryUpload = form.elements.boundary;
+let provinceBoundary;
 const api = location.hostname.endsWith('github.io') ? 'https://soil-fertility-gis-api.onrender.com' : '';
 const views = [...document.querySelectorAll('[data-view]')];
 const exports = [...document.querySelectorAll('[data-export]')];
@@ -64,20 +67,42 @@ function fitBoundary() {
   if (bounds.isValid()) map.fitBounds(bounds, { padding: [14, 14], maxZoom: 16 });
 }
 
+function updateStudyArea() {
+  const custom = Boolean(boundaryUpload.files.length);
+  province.disabled = custom;
+  municipality.disabled = custom || !provinceBoundary;
+  const note = $('area-note');
+  note.hidden = !custom;
+  note.textContent = custom ? 'The uploaded boundary will be used for this run.' : '';
+  if (run) return;
+  boundary.clearLayers();
+  if (custom || !provinceBoundary) return;
+  const selected = municipality.value;
+  boundary.addData({
+    type: 'FeatureCollection',
+    features: provinceBoundary.features.filter((feature) => !selected || feature.properties.municipality === selected),
+  });
+  fitBoundary();
+}
+
 async function showProvince() {
   catalogRequest?.abort();
   catalogRequest = new AbortController();
   const { signal } = catalogRequest;
-  if (run || !province.value) return;
+  provinceBoundary = undefined;
+  municipality.replaceChildren(new Option('Entire province', ''));
+  updateStudyArea();
+  if (!province.value) return;
   try {
     const response = await request('/municipalities?province=' + encodeURIComponent(province.value), { signal });
     const area = await response.json();
-    if (!signal.aborted && !run) {
-      boundary.clearLayers().addData(area);
-      fitBoundary();
-    }
+    if (signal.aborted) return;
+    provinceBoundary = area;
+    const names = new Set(area.features.map(({ properties }) => properties.municipality).filter(Boolean));
+    for (const name of [...names].sort((a, b) => a.localeCompare(b))) municipality.add(new Option(name, name));
+    updateStudyArea();
   } catch (error) {
-    if (!signal.aborted) status('Boundary preview unavailable. ' + error.message, true);
+    if (!signal.aborted) status('Municipality list unavailable. ' + error.message, true);
   }
 }
 
@@ -100,6 +125,11 @@ async function loadProvinces() {
   }
 }
 province.addEventListener('change', showProvince);
+municipality.addEventListener('change', updateStudyArea);
+boundaryUpload.addEventListener('change', updateStudyArea);
+form.addEventListener('invalid', (event) => {
+  for (let section = event.target.closest('details'); section; section = section.parentElement.closest('details')) section.open = true;
+}, true);
 
 function swapChart(canvas, kind) {
   charts.get(canvas)?.destroy();
@@ -267,6 +297,20 @@ function renderResults(area, points) {
     for (const value of values) row.insertCell().append(value);
     return row;
   }));
+  $('diagnostic-findings').replaceChildren(...info.findings.map(({ title, summary, conclusion }) => {
+    const item = document.createElement('article');
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    const detail = document.createElement('p');
+    detail.textContent = summary;
+    const interpretation = document.createElement('p');
+    const label = document.createElement('strong');
+    label.textContent = 'Conclusion. ';
+    interpretation.append(label, conclusion);
+    item.append(heading, detail, interpretation);
+    return item;
+  }));
+  $('diagnostic-report').hidden = false;
   $('class-note').textContent = info.classification + ' · ' + (info.units || 'Source units');
   for (const metric of ['r2', 'rmse', 'mae', 'mbe']) $(metric).textContent = number(info.validation[metric]);
   swapChart($('scatter'), 'validation');
@@ -276,7 +320,7 @@ function renderResults(area, points) {
   const selected = views.find((button) => button.getAttribute('aria-pressed') === 'true');
   displayView(selected && !selected.hidden ? selected.dataset.view : 'prediction');
   fitBoundary();
-  $('run-meta').textContent = [info.parameter, info.province, info.crs, info.resolution_m + ' m', info.samples + ' samples', info.model].join(' · ');
+  $('run-meta').textContent = [info.parameter, info.study_area, info.crs, info.resolution_m + ' m', info.samples + ' samples', info.model].join(' · ');
 }
 
 const autoFit = $('auto-fit');
@@ -324,7 +368,10 @@ resultParameter.addEventListener('change', () => selectResult(resultParameter.va
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const data = new FormData(form);
-  if (data.get('boundary').size) data.delete('province');
+  if (data.get('boundary').size) {
+    data.delete('province');
+    data.delete('municipality');
+  }
   if (!data.get('province') && !data.get('boundary').size) {
     status('Choose a province or upload a study boundary.', true);
     return;
@@ -332,7 +379,6 @@ form.addEventListener('submit', async (event) => {
   for (const name of ['boundary', 'dem', 'results']) if (!data.get(name).size) data.delete(name);
   data.set('model', data.get('model').toLowerCase());
   data.set('dashboard', 'true');
-  catalogRequest?.abort();
   const submit = form.querySelector('[type=submit]');
   const started = Date.now();
   submit.disabled = true;

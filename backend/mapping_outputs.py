@@ -12,9 +12,7 @@ from pykrige.ok import OrdinaryKriging
 from rasterio.io import MemoryFile
 from rasterio.transform import array_bounds, from_bounds
 from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
-from reportlab.lib import colors
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+from diagnostic_report import findings, technical_pdf
 from scipy.linalg import pinv
 from scipy.ndimage import distance_transform_edt
 from scipy.optimize import least_squares
@@ -153,8 +151,9 @@ def reports(out, summary):
     rows = [[row["label"], row["range"], round(row["area_ha"], 3), round(row["percent"], 2)]
             for row in summary["classes"]]
     rows.append(["Total", "", round(sum(row["area_ha"] for row in summary["classes"]), 3), 100])
-    info = [["Study area", summary["province"]], ["Parameter", summary["parameter"]],
-            ["Units", summary["units"] or "Source units"], ["Model", summary["model"]],
+    info = [["Study area", summary["study_area"]], ["Parameter", summary["parameter"]],
+            ["Units", summary["units"] or "Source units"], ["Method", "Ordinary kriging"],
+            ["Variogram model", summary["model"]],
             ["Variogram fitting", summary["variogram_fit"]],
             ["Resolution (m)", summary["resolution_m"]], ["Samples", summary["samples"]],
             ["Classification", summary["classification"]]]
@@ -177,18 +176,10 @@ def reports(out, summary):
     workbook.save(xlsx)
     out.writestr("soil_report.xlsx", xlsx.getvalue())
 
-    style = getSampleStyleSheet()
-    pdf = io.BytesIO()
-    tables = [Table(info, hAlign="LEFT"), Table([columns, *rows], hAlign="LEFT"), Table(metrics, hAlign="LEFT")]
-    for table in tables:
-        table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d7e7f5")),
-                                   ("LINEBELOW", (0, 0), (-1, -1), .3, colors.HexColor("#b6c9dd"))]))
-    SimpleDocTemplate(pdf).build([
-        Paragraph("Soil Fertility GIS", style["Title"]), tables[0], Spacer(1, 16),
-        Paragraph("Classification and area statistics", style["Heading2"]), tables[1], Spacer(1, 16),
-        Paragraph("Five-fold cross-validation", style["Heading2"]), tables[2],
-    ])
-    out.writestr("soil_report.pdf", pdf.getvalue())
+    metric_names = ["Coefficient of determination (R²)", "Root mean squared error (RMSE)",
+                    "Mean absolute error (MAE)", "Mean bias error (MBE)"]
+    out.writestr("soil_report.pdf", technical_pdf(summary, info, columns, rows,
+                 [[name, metric[1]] for name, metric in zip(metric_names, metrics)]))
 
 
 def qgis_project(transform, shape, epsg):
@@ -292,6 +283,7 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
                     archive.write(file, file.name)
             out.writestr("soil_layers_shp.zip", shape_zip.getvalue())
             out.writestr("soil_fertility.qgz", qgis_project(transform, z.shape, crs.to_string()))
+            summary["findings"] = findings(summary)
             reports(out, summary)
         else:
             summary["warning"] = "No cross-validation performed"

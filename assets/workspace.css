@@ -68,8 +68,6 @@ td:nth-child(n+3), th:nth-child(n+3) { text-align: right; }
 tbody tr:nth-child(even) { background: #142b42; }
 .empty { color: var(--muted); }
 .table-wrap { overflow: auto; }
-.class-settings { margin-top: 10px; }
-.class-settings label, .class-settings > small { display: block; margin: 0 8px 8px; }
 #class-note:empty { display: none; }
 .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .wide { grid-column: 1 / -1; }
@@ -104,3 +102,9 @@ footer { display: flex; gap: 16px; justify-content: space-between; padding: 10px
 .leaflet-bar .map-home { display: block; width: 30px; height: 30px; padding: 0; border: 0; background: #fff; color: #182536; font-size: 22px; }
 .result-selector { display: flex; align-items: center; gap: 8px; padding: 6px 9px; }
 .result-selector select { width: auto; margin: 0; }
+.advanced > summary { background: #102038; font-size: 14px; font-weight: 700; padding: 9px 11px; }
+.advanced[open] > summary { border-bottom: 1px solid var(--line); }
+.advanced h3, .conclusion-grid h3 { font-size: 13px; margin: 0 0 3px; }
+.advanced h3:not(:first-child) { margin-top: 5px; }
+.conclusion-grid { display: grid; gap: 13px; }
+.conclusion-grid p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
