@@ -104,3 +104,6 @@ footer { display: flex; gap: 16px; justify-content: space-between; padding: 10px
   .chart-frame { height: 132px; }
   .map-panel #map, .map-panel .large-chart { height: 48vh; }
 }
+.check-row { display: flex; align-items: center; gap: 6px; }
+.check-row input { width: auto; margin: 0; accent-color: var(--blue); }
+.leaflet-bar .map-home { display: block; width: 30px; height: 30px; padding: 0; border: 0; background: #fff; color: #182536; font-size: 22px; }

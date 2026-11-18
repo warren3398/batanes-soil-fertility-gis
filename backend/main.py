@@ -130,6 +130,7 @@ def interpolate(
     province: str = Form(""), parameter: str = Form("N"), resolution: int = Form(100),
     model: str = Form("spherical"), lags: int = Form(12), lag_distance: float = Form(0),
     dashboard: bool = Form(False), thresholds: str = Form(""), units: str = Form(""),
+    manual_variogram: str = Form(""),
 ):
     from rasterio.errors import RasterioIOError
     from rasterio.features import geometry_mask
@@ -216,14 +217,14 @@ def interpolate(
                 raise ValueError("No grid cell centers fall inside the boundary. Use a finer resolution")
             x, y, values = pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy(), pts[parameter].to_numpy()
             settings = dict(variogram_model=model, nlags=lags, pseudo_inv=True)
-            fitted, validation = diagnostics(x, y, values, settings, lag_distance, dashboard)
+            fitted, validation = diagnostics(x, y, values, settings, lag_distance, dashboard, manual_variogram)
             ok = OrdinaryKriging(x, y, values, **settings, variogram_parameters=fitted)
             z = np.full(mask.shape, -9999, dtype="float32")
             v = z.copy()
             predict_grid(ok, z, v, rows, cols, minx, maxy, resolution)
             summary = dict(province=province or "Custom study area", parameter=parameter, samples=len(pts),
                            resolution_m=resolution, method="ordinary_kriging", model=model, crs=utm.to_string(),
-                           units=units.strip()[:32], validation=validation)
+                           units=units.strip()[:32], validation=validation, variogram_fit="manual" if manual_variogram else "automatic")
             output = write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard,
                                    thresholds, ok, dem, lag_distance, lags)
             return StreamingResponse(output, media_type="application/zip", headers={

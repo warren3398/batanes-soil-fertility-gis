@@ -58,8 +58,22 @@ def fit(x, y, values, settings, distance):
     return params
 
 
-def diagnostics(x, y, values, settings, distance, enabled):
-    params = fit(x, y, values, settings, distance)
+def diagnostics(x, y, values, settings, distance, enabled, manual=""):
+    model = settings["variogram_model"]
+    if manual:
+        params = [float(value) for value in manual.split(",")]
+        if len(params) != (2 if model == "linear" else 3) or not all(np.isfinite(params)):
+            raise ValueError("Enter all manual variogram parameters")
+        if params[0] < 0 or params[-1] < 0 or (model != "linear" and params[1] <= 0):
+            raise ValueError("Variogram values must be nonnegative and range or exponent must be positive")
+        if model == "power" and params[1] >= 2:
+            raise ValueError("Power exponent must be less than 2")
+        if model not in {"linear", "power"} and params[0] < params[-1]:
+            raise ValueError("Sill must be greater than or equal to nugget")
+        if distance and not len(empirical(x, y, values, distance, settings["nlags"])[0]):
+            raise ValueError("Increase lag distance or number of lags to include sample pairs")
+    else:
+        params = fit(x, y, values, settings, distance)
     if not enabled:
         return params, None
     predicted = np.empty_like(values, dtype=float)
@@ -71,7 +85,7 @@ def diagnostics(x, y, values, settings, distance, enabled):
         if np.all(args[2] == args[2][0]):
             predicted[test] = args[2][0]
         else:
-            fold = OrdinaryKriging(*args, **settings, variogram_parameters=fit(*args, settings, distance))
+            fold = OrdinaryKriging(*args, **settings, variogram_parameters=params if manual else fit(*args, settings, distance))
             predicted[test] = fold.execute("points", x[test], y[test])[0]
     error = predicted - values
     total = ((values - values.mean()) ** 2).sum()
@@ -128,6 +142,7 @@ def reports(out, summary):
     rows.append(["Total", "", round(sum(row["area_ha"] for row in summary["classes"]), 3), 100])
     info = [["Study area", summary["province"]], ["Parameter", summary["parameter"]],
             ["Units", summary["units"] or "Source units"], ["Model", summary["model"]],
+            ["Variogram fitting", summary["variogram_fit"]],
             ["Resolution (m)", summary["resolution_m"]], ["Samples", summary["samples"]],
             ["Classification", summary["classification"]]]
     metrics = [[key.upper(), round(summary["validation"][key], 6) if summary["validation"][key] is not None else "Undefined"]

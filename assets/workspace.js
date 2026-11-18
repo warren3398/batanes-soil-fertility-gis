@@ -15,6 +15,19 @@ const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servi
 }).addTo(map);
 L.control.layers({ Satellite: satellite, Streets: streets }).addTo(map);
 L.control.scale({ imperial: false }).addTo(map);
+const home = L.control({ position: 'topleft' });
+home.onAdd = () => {
+  const container = L.DomUtil.create('div', 'leaflet-bar');
+  const button = L.DomUtil.create('button', 'map-home', container);
+  button.type = 'button';
+  button.title = 'Zoom to study area';
+  button.setAttribute('aria-label', button.title);
+  button.textContent = '⌂';
+  L.DomEvent.disableClickPropagation(container);
+  button.addEventListener('click', () => boundary.getBounds().isValid() ? fitBoundary() : map.setView([20.55, 121.91], 9));
+  return container;
+};
+home.addTo(map);
 const boundary = L.geoJSON(null, { style: { color: '#e4effc', weight: 2, fill: false } }).addTo(map);
 const samples = L.geoJSON(null, {
   pointToLayer(feature, point) {
@@ -28,7 +41,6 @@ const samples = L.geoJSON(null, {
   },
 });
 let run;
-let view = 'prediction';
 let catalogRequest;
 const charts = new Map();
 const overlays = new Map();
@@ -163,7 +175,6 @@ async function rasterLayer(zip, name, summary) {
 }
 
 function displayView(next) {
-  view = next;
   for (const button of views) button.setAttribute('aria-pressed', String(button.dataset.view === next));
   const chart = next === 'variogram' || next === 'validation';
   const chartPanel = $('large-chart');
@@ -226,6 +237,20 @@ function renderResults(area, points) {
   fitBoundary();
   $('run-meta').textContent = [info.province, info.crs, info.resolution_m + ' m', info.samples + ' samples', info.model].join(' · ');
 }
+
+const autoFit = $('auto-fit');
+const modelSelect = form.elements.model;
+function manualSettings() {
+  const model = modelSelect.value.toLowerCase();
+  $('manual-label').textContent = model === 'linear' ? 'Slope, nugget' :
+    model === 'power' ? 'Scale, exponent, nugget' : 'Full sill, range (m), nugget';
+  $('manual-field').hidden = autoFit.checked;
+  form.elements.manual_variogram.disabled = autoFit.checked;
+  form.elements.manual_variogram.required = !autoFit.checked;
+}
+autoFit.addEventListener('change', manualSettings);
+modelSelect.addEventListener('change', manualSettings);
+manualSettings();
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
