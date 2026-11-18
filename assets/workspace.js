@@ -41,6 +41,9 @@ const samples = L.geoJSON(null, {
   },
 });
 let run;
+let results = new Map();
+const resultParameter = $('result-parameter');
+const parameters = ['N', 'P', 'K', 'pH', 'OM'];
 let catalogRequest;
 const charts = new Map();
 const overlays = new Map();
@@ -233,9 +236,10 @@ function renderResults(area, points) {
   swapChart($('variogram'), 'variogram');
   views.find((button) => button.dataset.view === 'elevation').hidden = !info.elevation;
   for (const button of exports) button.disabled = false;
-  displayView('prediction');
+  const selected = views.find((button) => button.getAttribute('aria-pressed') === 'true');
+  displayView(selected && !selected.hidden ? selected.dataset.view : 'prediction');
   fitBoundary();
-  $('run-meta').textContent = [info.province, info.crs, info.resolution_m + ' m', info.samples + ' samples', info.model].join(' · ');
+  $('run-meta').textContent = [info.parameter, info.province, info.crs, info.resolution_m + ' m', info.samples + ' samples', info.model].join(' · ');
 }
 
 const autoFit = $('auto-fit');
@@ -244,13 +248,41 @@ function manualSettings() {
   const model = modelSelect.value.toLowerCase();
   $('manual-label').textContent = model === 'linear' ? 'Slope, nugget' :
     model === 'power' ? 'Scale, exponent, nugget' : 'Full sill, range (m), nugget';
-  $('manual-field').hidden = autoFit.checked;
-  form.elements.manual_variogram.disabled = autoFit.checked;
-  form.elements.manual_variogram.required = !autoFit.checked;
+  const batch = form.elements.parameter.value === 'all';
+  const manual = !batch && !autoFit.checked;
+  $('batch-settings').hidden = !batch;
+  autoFit.disabled = batch;
+  form.elements.units.disabled = batch;
+  form.elements.thresholds.disabled = batch;
+  $('manual-field').hidden = !manual;
+  form.elements.manual_variogram.disabled = !manual;
+  form.elements.manual_variogram.required = manual;
 }
 autoFit.addEventListener('change', manualSettings);
 modelSelect.addEventListener('change', manualSettings);
+form.elements.parameter.addEventListener('change', manualSettings);
 manualSettings();
+
+async function mapParameter(data) {
+  const response = await request('/interpolate', { method: 'POST', body: data });
+  const blob = await response.blob();
+  const zip = await JSZip.loadAsync(blob);
+  const read = async (filename) => JSON.parse(await zip.file(filename).async('string'));
+  const [summary, area, points] = await Promise.all([read('summary.json'), read('municipalities.geojson'), read('samples.geojson')]);
+  const names = summary.elevation ? ['prediction', 'variance', 'elevation'] : ['prediction', 'variance'];
+  const layers = await Promise.all(names.map((name) => rasterLayer(zip, name, summary)));
+  return { blob, zip, summary, area, points, names, layers };
+}
+
+function selectResult(parameter) {
+  run = results.get(parameter);
+  for (const overlay of overlays.values()) overlay.remove();
+  overlays.clear();
+  run.names.forEach((name, index) => overlays.set(name, run.layers[index]));
+  renderResults(run.area, run.points);
+}
+
+resultParameter.addEventListener('change', () => selectResult(resultParameter.value));
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -269,26 +301,31 @@ form.addEventListener('submit', async (event) => {
   submit.disabled = true;
   $('progress').hidden = false;
   $('footer-status').textContent = 'Processing';
-  status('Validating inputs, fitting the variogram, and running kriging and cross-validation…');
+  const selected = data.get('parameter');
+  const requested = selected === 'all' ? parameters : [selected];
+  const completed = new Map();
+  const failures = [];
   try {
-    const response = await request('/interpolate', { method: 'POST', body: data });
-    status('Preparing map layers and reports…');
-    const blob = await response.blob();
-    const zip = await JSZip.loadAsync(blob);
-    const read = async (filename) => JSON.parse(await zip.file(filename).async('string'));
-    const [summary, area, points] = await Promise.all([read('summary.json'), read('municipalities.geojson'), read('samples.geojson')]);
-    const names = summary.elevation ? ['prediction', 'variance', 'elevation'] : ['prediction', 'variance'];
-    const layers = await Promise.all(names.map((name) => rasterLayer(zip, name, summary)));
-    for (const overlay of overlays.values()) overlay.remove();
-    overlays.clear();
-    names.forEach((name, i) => overlays.set(name, layers[i]));
-    run = { blob, zip, summary };
-    renderResults(area, points);
-    status('Mapping complete. GIS layers and reports are ready.');
-    $('footer-status').textContent = 'Complete';
+    for (const [index, parameter] of requested.entries()) {
+      status('Processing ' + parameter + ' (' + (index + 1) + ' of ' + requested.length + ')…');
+      data.set('parameter', parameter);
+      try {
+        completed.set(parameter, await mapParameter(data));
+      } catch (error) {
+        failures.push(parameter + ': ' + error.message);
+      }
+    }
+    if (!completed.size) throw new Error(failures.join(' • '));
+    results = completed;
+    resultParameter.replaceChildren(...Array.from(results.keys(), (parameter) => new Option(parameter, parameter)));
+    $('result-selector').hidden = requested.length === 1;
+    selectResult(resultParameter.value);
+    status(failures.length ? 'Completed ' + Array.from(results.keys()).join(', ') + '. ' + failures.join(' • ') :
+      'Mapping complete for ' + Array.from(results.keys()).join(', ') + '. GIS layers and reports are ready.', Boolean(failures.length));
+    $('footer-status').textContent = failures.length ? 'Partially complete' : 'Complete';
     $('timer').textContent = ((Date.now() - started) / 1000).toFixed(1) + ' s';
   } catch (error) {
-    status(error.message, true);
+    status(error.message + (run ? ' Previous results are still displayed.' : ''), true);
     $('footer-status').textContent = 'Run failed';
   } finally {
     submit.disabled = false;
@@ -311,7 +348,13 @@ for (const button of exports) {
     const name = button.dataset.export;
     try {
       if (name === 'all') {
-        download(run.blob, 'soil_fertility_outputs.zip');
+        if (results.size === 1) {
+          download(run.blob, 'soil_fertility_outputs.zip');
+        } else {
+          const archive = new JSZip();
+          for (const [parameter, result] of results) archive.file(parameter + '.zip', result.blob);
+          download(await archive.generateAsync({ type: 'blob' }), 'soil_fertility_all_parameters.zip');
+        }
       } else if (name === 'rasters' || name === 'qgis') {
         const source = run.zip;
         const files = name === 'qgis' ? [...rasters, 'soil_layers.gpkg', 'soil_fertility.qgz'] : rasters;

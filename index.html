@@ -31,7 +31,7 @@
         <h2>Input data</h2>
         <div class="panel-body stack">
           <label>Soil samples <input name="points" type="file" accept=".csv,.xlsx,.zip" required></label>
-          <small>CSV or XLSX with latitude, longitude and parameter, or a point Shapefile ZIP.</small>
+          <small>CSV or XLSX with latitude, longitude and N, P, K, pH, and OM columns, or a point Shapefile ZIP.</small>
           <label>Lab results <small>Optional</small><input name="results" type="file" accept=".csv,.xlsx"></label>
           <small>Join a separate lab table using sample_id.</small>
           <label>Province <select name="province" id="province"><option value="">Loading provinces…</option></select></label>
@@ -42,10 +42,11 @@
       <section class="panel">
         <h2>Mapping parameters</h2>
         <div class="panel-body stack">
-          <label class="split">Soil parameter <select name="parameter"><option value="N">Nitrogen (N)</option><option value="P">Phosphorus (P)</option><option value="K">Potassium (K)</option><option value="pH">pH</option></select></label>
+          <label class="split">Soil parameter <select name="parameter"><option value="all" selected>N, P, K, pH, OM</option><option value="N">Nitrogen (N)</option><option value="P">Phosphorus (P)</option><option value="K">Potassium (K)</option><option value="pH">pH</option><option value="OM">Organic matter (OM)</option></select></label>
           <label class="split">Method <span class="field-value">Ordinary Kriging</span></label>
           <label class="split">Resolution (m) <input type="number" name="resolution" min="10" max="5000" value="500" required></label>
           <label class="split">Units <input name="units" placeholder="e.g. %, mg/kg" maxlength="32"></label>
+          <small id="batch-settings">All-parameter runs auto-fit each variogram and use separate class ranges. Choose one parameter to set its units, thresholds, or manual fit.</small>
           <details open><summary>Variogram settings</summary>
             <div class="stack details-body">
               <label class="split">Model <select name="model"><option>Spherical</option><option>Exponential</option><option>Gaussian</option><option>Linear</option><option>Power</option></select></label>
@@ -69,6 +70,7 @@
     </form>
     <div class="main-column">
       <section class="panel map-panel" id="map-panel">
+        <label class="result-selector" id="result-selector" hidden>Results for <select id="result-parameter"></select></label>
         <div class="tabs" role="group" aria-label="Map and diagnostics">
           <button type="button" data-view="prediction" aria-pressed="true">Prediction map</button>
           <button type="button" data-view="samples" aria-pressed="false">Sample points</button>

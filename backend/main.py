@@ -139,8 +139,9 @@ def interpolate(
         raise HTTPException(400, "Resolution must be 10–5000 m")
     if model not in {"spherical", "exponential", "gaussian", "linear", "power"} or not 3 <= lags <= 30 or not np.isfinite(lag_distance) or lag_distance < 0:
         raise HTTPException(400, "Invalid variogram settings")
-    if parameter not in {"N", "P", "K", "pH"}:
-        raise HTTPException(400, "Choose N, P, K, or pH")
+    if parameter not in {"N", "P", "K", "pH", "OM"}:
+        raise HTTPException(400, "Choose N, P, K, pH, or OM")
+    value_fields = ("om", "organic matter", "organic_matter", "organic_ma") if parameter == "OM" else (parameter.casefold(),)
     try:
         with tempfile.TemporaryDirectory() as d:
             folder = Path(d)
@@ -180,7 +181,7 @@ def interpolate(
                 lab = read_table(results)
                 point_id = field(pts, "sample_id", "sampleid", "id")
                 lab_id = field(lab, "sample_id", "sampleid", "id")
-                value_col = field(lab, parameter.casefold())
+                value_col = field(lab, *value_fields)
                 if point_id is None or lab_id is None or value_col is None:
                     raise ValueError(f"Samples and lab table need sample_id, and the lab table needs {parameter}")
                 ids = lab[lab_id].astype("string").str.strip()
@@ -189,7 +190,7 @@ def interpolate(
                 values = dict(zip(ids, lab[value_col]))
                 pts[parameter] = pts[point_id].astype("string").str.strip().map(values)
             else:
-                value_col = field(pts, parameter.casefold())
+                value_col = field(pts, *value_fields)
                 if value_col is None:
                     raise ValueError(f"Sample data needs a numerical {parameter} field or a separate lab table")
                 pts[parameter] = pts[value_col]

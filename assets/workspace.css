@@ -103,3 +103,5 @@ footer { display: flex; gap: 16px; justify-content: space-between; padding: 10px
 .check-row { display: flex; align-items: center; gap: 6px; }
 .check-row input { width: auto; margin: 0; accent-color: var(--blue); }
 .leaflet-bar .map-home { display: block; width: 30px; height: 30px; padding: 0; border: 0; background: #fff; color: #182536; font-size: 22px; }
+.result-selector { display: flex; align-items: center; gap: 8px; padding: 6px 9px; }
+.result-selector select { width: auto; margin: 0; }
