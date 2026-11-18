@@ -5,7 +5,7 @@ import pandas as pd
 import geopandas as gpd
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pykrige.ok import OrdinaryKriging
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
@@ -14,8 +14,12 @@ import boto3
 from botocore.config import Config
 app=FastAPI(title="Soil Fertility GIS API")
 app.add_middleware(CORSMiddleware,allow_origins=["https://warren3398.github.io","http://localhost:8000"],allow_methods=["*"],allow_headers=["*"])
+@app.get("/", include_in_schema=False)
+def website():
+    return FileResponse(Path(__file__).resolve().parents[1] / "index.html")
+
 @app.get("/health")
-def health(): return {"status":"ok","method":"ordinary_kriging","boundaries":"upload_required"}
+def health(): return {"status":"ok","method":"ordinary_kriging","boundaries":"r2_catalog"}
 def loadshape(b,folder):
     Path(folder).mkdir(parents=True,exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(b)) as z:
@@ -34,24 +38,70 @@ def r2client():
     missing=[k for k in required if not os.environ.get(k)]
     if missing: raise HTTPException(503,"R2 boundary storage not configured: "+", ".join(missing))
     return boto3.client("s3",endpoint_url="https://"+os.environ["R2_ACCOUNT_ID"]+".r2.cloudflarestorage.com",aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],region_name="auto",config=Config(signature_version="s3v4"))
+def read_boundary(key, *, ignore_geometry=False):
+    bucket = os.environ.get("R2_BUCKET", "slopemap-gis-data")
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "boundary.gpkg")
+            r2client().download_file(bucket, key, path)
+            return gpd.read_file(path, ignore_geometry=ignore_geometry)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "Cannot load administrative boundaries from R2; check object key and access") from exc
+
+
+def field(frame, *aliases):
+    columns = {str(column).strip().casefold(): column for column in frame.columns}
+    return next((columns[alias] for alias in aliases if alias in columns), None)
+
+
 @functools.lru_cache(maxsize=1)
 def admin_catalog():
-    key=os.environ.get("R2_MUNICIPALITY_BOUNDARY_KEY","boundaries/municipalities.gpkg")
-    bucket=os.environ.get("R2_BUCKET","slopemap-gis-data")
-    try:
-        blob=r2client().get_object(Bucket=bucket,Key=key)["Body"].read()
-        with tempfile.NamedTemporaryFile(suffix=".gpkg") as f:
-            f.write(blob);f.flush()
-            g=gpd.read_file(f.name)
-    except HTTPException: raise
-    except Exception as e: raise HTTPException(503,"Cannot load administrative boundaries from R2; check object key and access")
-    cols={c.lower():c for c in g.columns}
-    prov=next((cols[k] for k in ["province","prov_name","adm2_en","name_2"] if k in cols),None)
-    muni=next((cols[k] for k in ["municipality","mun_name","adm3_en","name_3"] if k in cols),None)
-    if not prov or not muni: raise HTTPException(503,"Boundary layer needs province and municipality name columns")
-    g=g.rename(columns={prov:"province",muni:"municipality"})
-    if g.crs is None: raise HTTPException(503,"Boundary layer has no CRS")
-    return g
+    key = os.environ.get("R2_MUNICIPALITY_BOUNDARY_KEY", "boundaries/municipalities.gpkg")
+    municipalities = read_boundary(key)
+    if municipalities.crs is None:
+        raise HTTPException(503, "Boundary layer has no CRS")
+
+    municipality_field = field(
+        municipalities, "municipality", "mun_name", "adm3_en", "adm3_name",
+        "city_mun", "city_name", "city", "name_3", "name_2",
+    )
+    if municipality_field is None:
+        raise HTTPException(503, "Municipality name field missing: " + ", ".join(municipalities.columns))
+
+    province_aliases = ("province", "prov_name", "prov", "adm2_en", "adm2_name")
+    province_field = field(municipalities, *province_aliases)
+    if province_field is None:
+        # NAME_2 is a province only when the municipality comes from NAME_3.
+        aliases = ("name_2", "name_1") if municipality_field.casefold() == "name_3" else ("name_1",)
+        province_field = field(municipalities, *aliases)
+
+    if province_field is not None:
+        province_names = municipalities[province_field]
+    else:
+        code_aliases = ("adm2_pcode", "prov_pcode", "province_code", "psgc_prov")
+        child_code = field(municipalities, *code_aliases)
+        if child_code is None:
+            raise HTTPException(503, "Province name or parent code missing: " + ", ".join(municipalities.columns))
+        province_key = os.environ.get("R2_PROVINCE_BOUNDARY_KEY", "boundaries/provinces.gpkg")
+        provinces = read_boundary(province_key, ignore_geometry=True)
+        parent_code = field(provinces, *code_aliases)
+        parent_name = field(provinces, *province_aliases, "name_2", "name_1")
+        if parent_code is None or parent_name is None:
+            raise HTTPException(503, "Province catalog requires a province name and code")
+        codes = provinces[parent_code].astype("string").str.strip().str.upper()
+        lookup = dict(zip(codes, provinces[parent_name]))
+        province_names = municipalities[child_code].astype("string").str.strip().str.upper().map(lookup)
+
+    catalog = municipalities.assign(
+        province=province_names.astype("string").str.strip(),
+        municipality=municipalities[municipality_field].astype("string").str.strip(),
+    )
+    if catalog.province.fillna("").eq("").any() or catalog.municipality.fillna("").eq("").any():
+        raise HTTPException(503, "Some boundaries have no province or municipality name")
+    return catalog
+
 @app.get("/provinces")
 def provinces():
     g=admin_catalog()
@@ -76,7 +126,7 @@ async def interpolate(points:UploadFile=File(...),results:UploadFile=File(...),p
                 if missing: raise ValueError("Missing fields: "+", ".join(missing))
             if pts.geometry.geom_type.ne("Point").any(): raise ValueError("Sampling layer must contain points")
             area=bounds[bounds.province.astype(str).str.casefold()==province.casefold()]
-            if area.empty: raise ValueError("Province not found in uploaded boundaries")
+            if area.empty: raise ValueError("Province not found in the boundary catalog")
             area=area.to_crs(4326)
             poly=area.geometry.union_all()
             pts=pts.to_crs(4326)
