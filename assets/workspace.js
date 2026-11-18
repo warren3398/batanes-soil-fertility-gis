@@ -222,8 +222,9 @@ async function rasterLayer(zip, name, summary, outline) {
     if (name === 'prediction') {
       let category = 0;
       while (category < summary.breaks.length && value >= summary.breaks[category]) category++;
-      const code = summary.class_max != null && value > summary.class_max ? 5 :
+      const code = summary.class_max != null && value > summary.class_max ? 0 :
         (summary.class_codes?.[category] ?? category + 1);
+      if (!code) continue;
       rgb = palette[code - 1];
     } else {
       rgb = name === 'variance' ? [35 + 211 * fraction, 158 - 65 * fraction, 231 - 182 * fraction] :
@@ -293,7 +294,7 @@ function renderResults(area, points) {
   boundary.clearLayers().addData(area);
   samples.clearLayers().addData(points);
   const rows = info.classes.map((item) => [swatch(item.color, item.label), item.range, number(item.area_ha, 2), number(item.percent, 2)]);
-  rows.push(['Total', '', number(info.classes.reduce((sum, item) => sum + item.area_ha, 0)), '100']);
+  rows.push(['Total', '', number(info.classes.reduce((sum, item) => sum + item.area_ha, 0)), number(info.classified_share_total)]);
   $('classes').replaceChildren(...rows.map((values) => {
     const row = document.createElement('tr');
     for (const value of values) row.insertCell().append(value);
@@ -404,6 +405,8 @@ form.addEventListener('submit', async (event) => {
       }
     }
     if (!completed.size) throw new Error(failures.join(' • '));
+    const runStamp = new Date(started).toISOString().replace(/[-:.]/g, '').replace('T', '_');
+    for (const result of completed.values()) result.runStamp = runStamp;
     results = completed;
     resultParameter.replaceChildren(...Array.from(results.keys(), (parameter) => new Option(parameter, parameter)));
     $('result-selector').hidden = requested.length === 1;
@@ -429,22 +432,33 @@ function download(blob, name) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+function outputName(result, suffix, parameter = result.summary.parameter) {
+  const area = result.summary.study_area.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64) || 'study-area';
+  return `soil-fertility_${area}_${parameter}_${result.runStamp}_${suffix}`;
+}
+const exportSuffix = {
+  'soil_layers_shp.zip': 'shapefiles.zip',
+  'soil_layers.gpkg': 'layers.gpkg',
+  'soil_report.xlsx': 'report.xlsx',
+  'soil_report.pdf': 'report.pdf',
+};
 const rasters = ['prediction.tif', 'variance.tif', 'classification.tif'];
 for (const button of exports) {
   button.addEventListener('click', async () => {
     if (!run) return;
+    const selected = run;
     const name = button.dataset.export;
     try {
       if (name === 'all') {
         if (results.size === 1) {
-          download(run.blob, 'soil_fertility_outputs.zip');
+          download(selected.blob, outputName(selected, 'outputs.zip'));
         } else {
           const archive = new JSZip();
-          for (const [parameter, result] of results) archive.file(parameter + '.zip', result.blob);
-          download(await archive.generateAsync({ type: 'blob' }), 'soil_fertility_all_parameters.zip');
+          for (const result of results.values()) archive.file(outputName(result, 'outputs.zip'), result.blob);
+          download(await archive.generateAsync({ type: 'blob' }), outputName(selected, 'outputs.zip', 'all-parameters'));
         }
       } else if (name === 'layout') {
-        const selected = run;
         const originalLabel = button.textContent;
         button.disabled = true;
         button.textContent = 'Generating map layout…';
@@ -456,20 +470,20 @@ for (const button of exports) {
           const data = new FormData();
           data.set('result', await archive.generateAsync({ type: 'blob' }), 'map-result.zip');
           const response = await request('/map-layout', { method: 'POST', body: data });
-          download(await response.blob(), 'soil_fertility_' + selected.summary.parameter + '_layout.jpg');
+          download(await response.blob(), outputName(selected, 'layout.jpg'));
         } finally {
           button.textContent = originalLabel;
           button.removeAttribute('aria-busy');
           button.disabled = false;
         }
       } else if (name === 'rasters' || name === 'qgis') {
-        const source = run.zip;
+        const source = selected.zip;
         const files = name === 'qgis' ? [...rasters, 'soil_layers.gpkg', 'soil_fertility.qgz'] : rasters;
         const archive = new JSZip();
         await Promise.all(files.map(async (file) => archive.file(file, await source.file(file).async('uint8array'))));
-        download(await archive.generateAsync({ type: 'blob' }), name === 'qgis' ? 'soil_qgis_project.zip' : 'soil_geotiffs.zip');
+        download(await archive.generateAsync({ type: 'blob' }), outputName(selected, name === 'qgis' ? 'qgis-project.zip' : 'geotiffs.zip'));
       } else {
-        download(await run.zip.file(name).async('blob'), name);
+        download(await selected.zip.file(name).async('blob'), outputName(selected, exportSuffix[name]));
       }
     } catch (error) {
       status('Export failed. ' + error.message, true);

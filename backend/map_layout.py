@@ -187,8 +187,8 @@ def map_layout(package):
         raster = read_member(archive, "map_prediction.tif", 3_000_000)
     classes = summary["classes"]
     breaks = np.asarray(summary["breaks"], dtype=float)
-    if len(classes) != 5 or breaks.shape not in {(4,), (5,)} or not np.isfinite(breaks).all():
-        raise ValueError("The result must have five fertility classes")
+    if len(classes) not in {4, 5} or breaks.shape not in {(4,), (5,)} or not np.isfinite(breaks).all():
+        raise ValueError("The result must have four or five fertility classes")
     if outline.is_empty or not shapely.get_coordinates(outline).shape[0] or any(not math.isfinite(v) for v in outline.bounds):
         raise ValueError("Invalid study boundary")
     if not shapely.box(100, -5, 140, 30).covers(outline):
@@ -210,13 +210,13 @@ def map_layout(package):
     valid = mask & np.isfinite(data) & (data != -9999)
     if not valid.any():
         raise ValueError("No predicted cells intersect the layout")
-    palette = np.array([ImageColor.getrgb(row["color"]) for row in classes], dtype="uint8")
+    palette = np.array([(0, 0, 0), *[ImageColor.getrgb(row["color"]) for row in classes]], dtype="uint8")
     rgba = np.empty((*data.shape, 4), dtype="uint8")
     for row in range(0, height, 128):
         chunk = slice(row, row + 128)
-        category = classify_values(data[chunk], summary) - 1
+        category = classify_values(data[chunk], summary)
         rgba[chunk, :, :3] = palette[category]
-        rgba[chunk, :, 3] = np.where(valid[chunk], 179, 0)
+        rgba[chunk, :, 3] = np.where(valid[chunk] & (category != 0), 179, 0)
     del data, mask, valid
     background, relief = hillshade(bounds)
     shoreline = paint_ocean(background, bounds)
@@ -291,13 +291,13 @@ def compose(atlas, bounds, summary, relief):
     total = sum(float(row["area_ha"]) for row in classes)
     values = [["Class", "Area (ha)", "Share (%)"],
               *[[row["label"], f"{float(row['area_ha']):,.2f}", f"{float(row['percent']):.2f}"] for row in classes],
-              ["Total", f"{total:,.2f}", "100.00"]]
+              ["Total", f"{total:,.2f}", f"{100 if total else 0:.2f}"]]
     edges = [x0, x0 + 220, x0 + 440, x1]
     for i, row in enumerate(values):
         y = 720 + 46 * i
-        draw.rectangle((x0, y, x1, y+46), fill="#e8eee9" if i in (0, 6) else "white", outline=RULE)
+        draw.rectangle((x0, y, x1, y+46), fill="#e8eee9" if i in (0, len(values) - 1) else "white", outline=RULE)
         for j, value in enumerate(row):
-            fit_text(draw, ((edges[j]+edges[j+1])/2, y+23), value, edges[j+1]-edges[j]-12, 22, i in (0, 6), anchor="mm")
+            fit_text(draw, ((edges[j]+edges[j+1])/2, y+23), value, edges[j+1]-edges[j]-12, 22, i in (0, len(values) - 1), anchor="mm")
     band(1072, "MAP INFORMATION")
     for i, line in enumerate([
         f"Method: Ordinary kriging · {summary['model'].title()} variogram",
@@ -308,7 +308,7 @@ def compose(atlas, bounds, summary, relief):
     ]):
         fit_text(draw, (x0+18, 1156+i*48), line, x1-x0-36, 22)
     if summary.get("classification_note"):
-        fit_text(draw, (x0+18, 1415), "Between-band gaps use midpoint cutoffs.", x1-x0-36, 20)
+        fit_text(draw, (x0+18, 1415), f"Classified coverage: {summary.get('classified_coverage_pct', 100):.1f}% of prediction grid.", x1-x0-36, 20)
     output = io.BytesIO()
     page.save(output, format="JPEG", quality=96, subsampling=0, dpi=(300, 300))
     return output.getvalue()

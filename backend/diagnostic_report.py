@@ -22,10 +22,11 @@ def map_finding(summary, values):
     total = sum(row["area_ha"] for row in classes)
     largest = max(row["area_ha"] for row in classes)
     leaders = [row for row in classes if row["area_ha"] == largest]
-    rated = [row for row in classes if row["label"] != "Outside guide range"]
-    lower = sum(row["percent"] for row in rated[:2])
-    higher = sum(row["percent"] for row in rated[-2:])
-    if values.min() == values.max():
+    lower = sum(row["percent"] for row in classes[:2])
+    higher = sum(row["percent"] for row in classes[-2:])
+    if not total:
+        pattern = "No prediction cells were assigned a fertility class."
+    elif values.min() == values.max():
         pattern = "The prediction was uniform across the mapped area."
     elif len(leaders) == 1:
         leader = leaders[0]
@@ -34,15 +35,15 @@ def map_finding(summary, values):
         labels = ", ".join(row["label"].lower() for row in leaders)
         pattern = f"The leading classes ({labels}) tied at {largest:,.2f} ha each ({leaders[0]['percent']:.1f}% each)."
     basis = summary.get("classification_note", "Class shares reflect the thresholds supplied for this run.")
-    outside = sum(row["percent"] for row in classes if row["label"] == "Outside guide range")
-    if outside:
-        basis = f"{outside:.1f}% fell outside the guide range. " + basis
+    coverage = summary["classified_coverage_pct"]
+    if coverage < 100:
+        basis = f"Classified coverage was {coverage:.1f}% of the prediction grid. " + basis
     return dict(
-        summary=f"For {summary['parameter']} in {summary['study_area']}, the mapped area was {total:,.2f} ha. "
+        summary=f"For {summary['parameter']} in {summary['study_area']}, the classified area was {total:,.2f} ha. "
                 f"Predicted values ranged from {values.min():.5g} to {values.max():.5g}, "
                 f"with a mean of {values.mean(dtype=np.float64):.5g} ({summary['units'] or 'source units'}).",
-        conclusion=pattern + f" The two lower classes accounted for {lower:.1f}% of the mapped area, "
-                  f"and the two higher classes accounted for {higher:.1f}%. " + basis,
+        conclusion=pattern + (f" The two lower classes accounted for {lower:.1f}% of the classified area, "
+                              f"and the two higher classes accounted for {higher:.1f}%. " if total else " ") + basis,
     )
 
 

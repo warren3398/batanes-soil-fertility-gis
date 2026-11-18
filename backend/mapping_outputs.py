@@ -149,7 +149,7 @@ def reports(out, summary):
     columns = ["Class", "Range", "Area (ha)", "Share (%)"]
     rows = [[row["label"], row["range"], round(row["area_ha"], 3), round(row["percent"], 2)]
             for row in summary["classes"]]
-    rows.append(["Total", "", round(sum(row["area_ha"] for row in summary["classes"]), 3), 100])
+    rows.append(["Total", "", round(sum(row["area_ha"] for row in summary["classes"]), 3), summary["classified_share_total"]])
     info = [["Study area", summary["study_area"]], ["Parameter", summary["parameter"]],
             ["Units", summary["units"] or "Source units"], ["Method", "Ordinary kriging"],
             ["Variogram model", summary["model"]],
@@ -233,12 +233,17 @@ def write_outputs(folder, pts, area, z, v, mask, transform, summary, dashboard, 
             vals = z[mask]
             definitions = classification(summary, thresholds, p_method, k_method)
             classified = np.zeros(mask.shape, dtype="uint8")
-            classified[mask] = classify_values(vals, summary)
+            codes = classify_values(vals, summary)
+            classified[mask] = codes
+            cell_count = int(np.count_nonzero(codes))
+            hectares_per_cell = summary["resolution_m"]**2 / 10000
+            summary.update(classified_share_total=100 if cell_count else 0,
+                           classified_coverage_pct=cell_count / len(vals) * 100)
             stats = []
             for i, ((label, color), range_label) in enumerate(definitions, 1):
                 count = int((classified == i).sum())
                 stats.append(dict(label=label, color=color, range=range_label,
-                                  area_ha=count * summary["resolution_m"]**2 / 10000, percent=count / len(vals) * 100))
+                                  area_ha=count * hectares_per_cell, percent=count / cell_count * 100 if cell_count else 0))
             lag, gamma = empirical(ok.X_ORIG, ok.Y_ORIG, ok.Z, distance, lags) if distance else (ok.lags, ok.semivariance)
             line = np.linspace(0, max(lag, default=distance * lags), 80)
             summary.update(classes=stats, variance=[float(v[mask].min()), float(v[mask].max())],
