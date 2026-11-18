@@ -22,8 +22,15 @@ from shapely.geometry import shape
 
 from coast import CREDIT, OCEAN, PROJECT, SHORELINE, draw_shoreline, paint_ocean
 
-MAP_SIZE = (1552, 1340)
-PAGE_SIZE = (2360, 1500)
+SCALE = 3840 / 2360
+
+
+def px(value):
+    return round(value * SCALE)
+
+
+MAP_SIZE = (px(1552), px(1340))
+PAGE_SIZE = (3840, px(1500))
 GREEN = "#005b3c"
 INK = "#202d27"
 RULE = "#b6c0b9"
@@ -49,7 +56,7 @@ def hillshade_tile(z, x, y):
 def hillshade(bounds):
     west, south, east, north = bounds
     span = 2 * MERCATOR_EDGE
-    zoom = max(0, min(16, math.floor(math.log2(span / max(east - west, north - south) * 5))))
+    zoom = max(0, min(16, math.floor(math.log2(span / max(east - west, north - south) * 7))))
     best = None
     best_coverage = 0
     with ThreadPoolExecutor(max_workers=12) as pool:
@@ -89,11 +96,43 @@ def hillshade(bounds):
 
 @lru_cache(maxsize=40)
 def font(size, bold=False):
+    size = px(size)
     name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     try:
         return ImageFont.truetype(name, size)
     except OSError:
         return ImageFont.load_default(size=size)
+
+
+class LayoutDraw:
+    """Scale page coordinates while drawing directly into the 4K image."""
+
+    def __init__(self, image):
+        self.draw = ImageDraw.Draw(image)
+
+    @staticmethod
+    def coordinates(values):
+        if isinstance(values[0], (tuple, list)):
+            return [tuple(px(value) for value in point) for point in values]
+        return tuple(px(value) for value in values)
+
+    def rectangle(self, xy, *, width=1, **kwargs):
+        self.draw.rectangle(self.coordinates(xy), width=px(width), **kwargs)
+
+    def ellipse(self, xy, *, width=1, **kwargs):
+        self.draw.ellipse(self.coordinates(xy), width=px(width), **kwargs)
+
+    def line(self, xy, *, width=1, **kwargs):
+        self.draw.line(self.coordinates(xy), width=px(width), **kwargs)
+
+    def polygon(self, xy, **kwargs):
+        self.draw.polygon(self.coordinates(xy), **kwargs)
+
+    def text(self, xy, text, **kwargs):
+        self.draw.text(self.coordinates(xy), text, **kwargs)
+
+    def textlength(self, text, **kwargs):
+        return self.draw.textlength(text, **kwargs) / SCALE
 
 
 def fit_text(draw, position, text, width, size=26, bold=False, fill=INK, anchor="lm"):
@@ -118,7 +157,7 @@ def draw_scale(draw, origin, bounds):
     center_x, center_y = (west + east) / 2, (south + north) / 2
     geographic = Transformer.from_crs(3857, 4326, always_xy=True)
     lon, lat = geographic.transform(center_x, center_y)
-    stop, _ = geographic.transform(center_x + (east - west) * 230 / MAP_SIZE[0], center_y)
+    stop, _ = geographic.transform(center_x + (east - west) * px(230) / MAP_SIZE[0], center_y)
     maximum = Geod(ellps="WGS84").inv(lon, lat, stop, lat)[2]
     base = 10 ** math.floor(math.log10(maximum))
     metres = max(base * step for step in (1, 2, 5) if base * step <= maximum)
@@ -170,16 +209,20 @@ def map_layout(package):
     valid = mask & np.isfinite(data) & (data != -9999)
     if not valid.any():
         raise ValueError("No predicted cells intersect the layout")
-    category = np.searchsorted(breaks, data, side="right")
     palette = np.array([ImageColor.getrgb(row["color"]) for row in classes], dtype="uint8")
     rgba = np.empty((*data.shape, 4), dtype="uint8")
-    rgba[:, :, :3] = palette[category]
-    rgba[:, :, 3] = np.where(valid, 179, 0)
+    for row in range(0, height, 128):
+        chunk = slice(row, row + 128)
+        category = np.searchsorted(breaks, data[chunk], side="right")
+        rgba[chunk, :, :3] = palette[category]
+        rgba[chunk, :, 3] = np.where(valid[chunk], 179, 0)
+    del data, mask, valid
     background, relief = hillshade(bounds)
     shoreline = paint_ocean(background, bounds)
     atlas = background.convert("RGBA")
     atlas.alpha_composite(Image.fromarray(rgba))
-    draw_shoreline(atlas, bounds, shoreline, width=2)
+    del rgba, background
+    draw_shoreline(atlas, bounds, shoreline, width=px(2))
     draw_boundaries(atlas, geometry, samples, transform)
     return compose(atlas, bounds, summary, relief)
 
@@ -192,19 +235,20 @@ def draw_boundaries(atlas, geometry, samples, transform):
             continue
         for ring in [part.exterior, *part.interiors]:
             coords = [pixels * (x, y) for x, y in ring.coords]
-            draw.line(coords, fill="white", width=3)
-            draw.line(coords, fill=INK, width=1)
+            draw.line(coords, fill="white", width=px(3))
+            draw.line(coords, fill=INK, width=px(1))
     for feature in samples["features"][:500]:
         lon, lat = feature["geometry"]["coordinates"][:2]
         x, y = pixels * PROJECT.transform(lon, lat)
-        draw.ellipse((x - 5, y - 5, x + 5, y + 5), fill="#fff9e9", outline=INK, width=2)
+        radius = px(5)
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill="#fff9e9", outline=INK, width=px(2))
 
 
 def compose(atlas, bounds, summary, relief):
     page = Image.new("RGB", PAGE_SIZE, "white")
-    draw = ImageDraw.Draw(page)
+    draw = LayoutDraw(page)
     draw.rectangle((20, 20, 2340, 1480), outline=INK, width=2)
-    page.paste(atlas, (44, 45))
+    page.paste(atlas, (px(44), px(45)))
     draw.rectangle((43, 44, 1597, 1386), outline=RULE, width=2)
     draw.rectangle((1464, 65, 1575, 203), fill="white", outline=RULE)
     draw.text((1519, 90), "N", font=font(25, True), fill=INK, anchor="mm")
@@ -263,5 +307,5 @@ def compose(atlas, bounds, summary, relief):
     ]):
         fit_text(draw, (x0+18, 1156+i*48), line, x1-x0-36, 22)
     output = io.BytesIO()
-    page.save(output, format="JPEG", quality=94, subsampling=0, dpi=(300, 300))
+    page.save(output, format="JPEG", quality=96, subsampling=0, dpi=(300, 300))
     return output.getvalue()
