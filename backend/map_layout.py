@@ -36,7 +36,7 @@ LAYOUT_MAX_BYTES = 12 * 1024 * 1024
 
 @lru_cache(maxsize=128)
 def hillshade_tile(z, x, y):
-    with urlopen(f"{TILE_URL}/{z}/{y}/{x}", timeout=4) as response:
+    with urlopen(f"{TILE_URL}/{z}/{y}/{x}?blankTile=false", timeout=4) as response:
         data = response.read(TERRAIN_MAX_TILE_BYTES + 1)
     if len(data) > TERRAIN_MAX_TILE_BYTES:
         raise ValueError("Hillshade tile exceeded size limit")
@@ -49,33 +49,42 @@ def hillshade_tile(z, x, y):
 def hillshade(bounds):
     west, south, east, north = bounds
     span = 2 * MERCATOR_EDGE
-    z = max(0, min(16, math.floor(math.log2(span / max(east - west, north - south) * 5))))
-    n = 2 ** z
-    factor = n * 256 / span
-    left, right = (west + MERCATOR_EDGE) * factor, (east + MERCATOR_EDGE) * factor
-    top, bottom = (MERCATOR_EDGE - north) * factor, (MERCATOR_EDGE - south) * factor
-    x0, y0 = math.floor(left / 256), math.floor(top / 256)
-    x1, y1 = math.ceil(right / 256), math.ceil(bottom / 256)
-    tiles = [(x, y) for x in range(x0, x1) for y in range(max(0, y0), min(n, y1))]
-    mosaic = Image.new("RGB", ((x1 - x0) * 256, (y1 - y0) * 256), "#eeefec")
-
-    def load(tile):
-        x, y = tile
-        try:
-            return hillshade_tile(z, x % n, y)
-        except (OSError, URLError, ValueError):
-            return None
-
+    zoom = max(0, min(16, math.floor(math.log2(span / max(east - west, north - south) * 5))))
+    best = None
+    best_coverage = 0
     with ThreadPoolExecutor(max_workers=12) as pool:
-        images = list(pool.map(load, tiles))
-    for (x, y), image in zip(tiles, images):
-        if image:
-            mosaic.paste(image, ((x - x0) * 256, (y - y0) * 256))
-    crop = (left - x0 * 256, top - y0 * 256, right - x0 * 256, bottom - y0 * 256)
-    background = mosaic.resize(MAP_SIZE, Image.Resampling.BILINEAR, crop)
-    credit = TERRAIN_CREDIT if all(images) and images else (
-        TERRAIN_CREDIT + " | Partial coverage" if any(images) else "Hillshade unavailable")
-    return background, credit
+        for z in range(zoom, max(-1, zoom - 5), -1):
+            n = 2 ** z
+            factor = n * 256 / span
+            left, right = (west + MERCATOR_EDGE) * factor, (east + MERCATOR_EDGE) * factor
+            top, bottom = (MERCATOR_EDGE - north) * factor, (MERCATOR_EDGE - south) * factor
+            x0, y0 = math.floor(left / 256), math.floor(top / 256)
+            x1, y1 = math.ceil(right / 256), math.ceil(bottom / 256)
+            tiles = [(x, y) for x in range(x0, x1) for y in range(max(0, y0), min(n, y1))]
+
+            def load(tile):
+                x, y = tile
+                try:
+                    return hillshade_tile(z, x % n, y)
+                except (OSError, URLError, ValueError):
+                    return None
+
+            images = list(pool.map(load, tiles))
+            coverage = sum(image is not None for image in images) / len(tiles) if tiles else 0
+            if coverage <= best_coverage:
+                continue
+            mosaic = Image.new("RGB", ((x1 - x0) * 256, (y1 - y0) * 256), "#eeefec")
+            for (x, y), image in zip(tiles, images):
+                if image is not None:
+                    mosaic.paste(image, ((x - x0) * 256, (y - y0) * 256))
+            crop = (left - x0 * 256, top - y0 * 256, right - x0 * 256, bottom - y0 * 256)
+            best = mosaic.resize(MAP_SIZE, Image.Resampling.BILINEAR, crop)
+            best_coverage = coverage
+            if coverage == 1:
+                return best, TERRAIN_CREDIT
+    if best is not None:
+        return best, TERRAIN_CREDIT + " | Partial coverage"
+    return Image.new("RGB", MAP_SIZE, "#eeefec"), "Hillshade unavailable"
 
 
 @lru_cache(maxsize=40)
