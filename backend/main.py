@@ -62,7 +62,8 @@ def municipalities(province:str):
     a=g[g.province.astype(str).str.casefold()==province.casefold()]
     if a.empty: raise HTTPException(404,"Province not found")
     return json.loads(a.to_crs(4326).to_json())
-\n@app.post("/interpolate")
+
+@app.post("/interpolate")
 async def interpolate(points:UploadFile=File(...),results:UploadFile=File(...),province:str=Form(...),parameter:str=Form("N"),resolution:int=Form(100)):
     if resolution<10 or resolution>5000: raise HTTPException(400,"Resolution must be 10-5000 m")
     try:
